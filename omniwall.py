@@ -38,6 +38,9 @@ DEFAULT_CONFIG = {
     "ratios": "16x9",
     "purity": "100",  # SFW
     "buffer_size": 5,  # количество оффлайн-обоев в буфере
+    "max_cache_mb": 80,  # максимальный размер кэша обоев (МБ)
+    "max_cached_files": 15,  # максимум файлов в кэше
+    "max_file_size_mb": 15,  # лимит размера одного файла обоев (МБ)
     "schedule": "12:00",  # ежедневное время смены
     "sources": ["wallhaven", "bing"],
     "default_queries": [
@@ -149,6 +152,95 @@ def notify(title, message):
     except Exception:
         pass
 
+# ----------------- УПРАВЛЕНИЕ КЭШЕМ И ОПТИМИЗАЦИЯ МЕСТА -----------------
+
+def get_directory_stats(dir_path):
+    if not dir_path.exists():
+        return 0, 0, []
+    files = [f for f in dir_path.iterdir() if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+    total_bytes = sum(f.stat().st_size for f in files)
+    return len(files), total_bytes, files
+
+def cleanup_cache(config, force_clean=False):
+    """
+    Удаляет устаревшие обои по принципу LRU (Least Recently Used),
+    удерживая кэш в пределах max_cache_mb и max_cached_files.
+    Никогда не удаляет текущие установленные обои и файлы оффлайн-буфера.
+    """
+    max_mb = config.get("max_cache_mb", 80)
+    max_files = config.get("max_cached_files", 15)
+    max_bytes = max_mb * 1024 * 1024
+
+    state = load_state()
+    protected_paths = set()
+
+    # Защищаем текущие установленные обои
+    if state.get("current") and state["current"].get("path"):
+        try:
+            curr_p = Path(state["current"]["path"]).resolve()
+            if curr_p.exists():
+                protected_paths.add(curr_p)
+        except Exception:
+            pass
+
+    # Защищаем 1 предыдущий файл из истории (для omniwall prev)
+    history = state.get("history", [])
+    if history:
+        try:
+            prev_p = Path(history[-1]["path"]).resolve()
+            if prev_p.exists():
+                protected_paths.add(prev_p)
+        except Exception:
+            pass
+
+    count, total_bytes, files = get_directory_stats(CACHE_DIR)
+    if not files:
+        return 0, 0
+
+    # Сортируем от самых старых к новым (по времени mtime)
+    files.sort(key=lambda f: f.stat().st_mtime)
+
+    deleted_count = 0
+    deleted_bytes = 0
+
+    if force_clean:
+        for f in files:
+            if f.resolve() not in protected_paths:
+                f_size = f.stat().st_size
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                    deleted_bytes += f_size
+                except Exception:
+                    pass
+    else:
+        for f in files:
+            # Прекращаем удаление, если уже уложились в оба лимита
+            current_rem_bytes = total_bytes - deleted_bytes
+            current_rem_count = count - deleted_count
+            if current_rem_bytes <= max_bytes and current_rem_count <= max_files:
+                break
+
+            if f.resolve() in protected_paths:
+                continue
+
+            f_size = f.stat().st_size
+            try:
+                f.unlink()
+                deleted_count += 1
+                deleted_bytes += f_size
+            except Exception:
+                pass
+
+    # Очищаем историю от ссылок на удалённые файлы
+    if deleted_count > 0:
+        new_hist = [h for h in history if Path(h["path"]).exists()]
+        if len(new_hist) != len(history):
+            state["history"] = new_hist
+            save_state(state)
+
+    return deleted_count, deleted_bytes
+
 # ----------------- КРОСС-ОКРУЖЕНИЕ (DE DETECTION) -----------------
 
 def detect_and_apply_wallpaper(image_path):
@@ -251,7 +343,7 @@ def apply_wallpaper(image_path, title=None, config=None, silent=False):
 
 # ----------------- ПРОВАЙДЕРЫ ОБОЕВ -----------------
 
-def fetch_wallhaven(query, min_res, ratio, purity="100"):
+def fetch_wallhaven(query, min_res, ratio, config, purity="100"):
     headers = {"User-Agent": "Mozilla/5.0 omniwall/1.0"}
     encoded_q = urllib.parse.quote(query)
     url = (
@@ -266,7 +358,12 @@ def fetch_wallhaven(query, min_res, ratio, purity="100"):
     if not items:
         return None
 
-    choice = random.choice(items)
+    max_bytes = config.get("max_file_size_mb", 15) * 1024 * 1024
+    valid_items = [it for it in items if it.get("file_size", 0) <= max_bytes]
+    if not valid_items:
+        valid_items = items
+
+    choice = random.choice(valid_items)
     img_id = choice["id"]
     ext = choice["file_type"].split("/")[-1]
     if ext == "jpeg":
@@ -275,12 +372,19 @@ def fetch_wallhaven(query, min_res, ratio, purity="100"):
 
     if not target_file.exists():
         dl_req = urllib.request.Request(choice["path"], headers=headers)
-        with urllib.request.urlopen(dl_req, timeout=25) as dl_resp, open(target_file, "wb") as f:
-            f.write(dl_resp.read())
+        with urllib.request.urlopen(dl_req, timeout=25) as dl_resp:
+            cl = dl_resp.headers.get("Content-Length")
+            if cl and int(cl) > max_bytes:
+                return None
+            data = dl_resp.read()
+            if len(data) > max_bytes:
+                return None
+            with open(target_file, "wb") as f:
+                f.write(data)
 
     return target_file, f"{query} [Wallhaven {choice['resolution']}]"
 
-def fetch_bing_hd(query, min_res=None):
+def fetch_bing_hd(query, config, min_res=None):
     headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"}
     search_term = f"{query} 4k wallpaper 3840x2160 uhd"
     url = f"https://www.bing.com/images/search?q={urllib.parse.quote(search_term)}&form=HDRSC2&first=1"
@@ -294,6 +398,7 @@ def fetch_bing_hd(query, min_res=None):
     if not valid_links:
         return None
 
+    max_bytes = config.get("max_file_size_mb", 15) * 1024 * 1024
     random.shuffle(valid_links)
     for img_url in valid_links[:5]:
         try:
@@ -301,8 +406,15 @@ def fetch_bing_hd(query, min_res=None):
             target_file = CACHE_DIR / filename
             if not target_file.exists():
                 dl_req = urllib.request.Request(img_url, headers=headers)
-                with urllib.request.urlopen(dl_req, timeout=15) as dl_resp, open(target_file, "wb") as f:
-                    f.write(dl_resp.read())
+                with urllib.request.urlopen(dl_req, timeout=15) as dl_resp:
+                    cl = dl_resp.headers.get("Content-Length")
+                    if cl and int(cl) > max_bytes:
+                        continue
+                    data = dl_resp.read()
+                    if len(data) > max_bytes:
+                        continue
+                    with open(target_file, "wb") as f:
+                        f.write(data)
             return target_file, f"{query} [Web 4K Engine]"
         except Exception:
             continue
@@ -317,11 +429,11 @@ def fetch_from_any_source(query, config, min_res=None, ratio=None):
     for src in sources:
         try:
             if src == "wallhaven":
-                res = fetch_wallhaven(query, min_res, ratio, purity=config.get("purity", "100"))
+                res = fetch_wallhaven(query, min_res, ratio, config, purity=config.get("purity", "100"))
                 if res:
                     return res
             elif src == "bing":
-                res = fetch_bing_hd(query, min_res)
+                res = fetch_bing_hd(query, config, min_res)
                 if res:
                     return res
         except Exception:
@@ -372,6 +484,7 @@ def sync_buffer(target_count, config, custom_tag=None):
 
     total = len(get_buffer_files())
     print(f"✓ Готово! Текущий оффлайн-буфер: {total} обоев.")
+    cleanup_cache(config)
 
 def get_local_wallpapers(filter_query=None):
     exts = {".jpg", ".jpeg", ".png", ".webp"}
@@ -489,6 +602,7 @@ def cmd_next(args, config):
             target_buffer = args.buffer or config.get("buffer_size", 5)
             if len(get_buffer_files()) < target_buffer:
                 sync_buffer(target_buffer, config)
+            cleanup_cache(config)
             return
 
     local_files = get_local_wallpapers(filter_query=raw_query)
@@ -503,6 +617,7 @@ def cmd_next(args, config):
     candidates = [f for f in local_files if str(f) != current_path]
     chosen = random.choice(candidates if candidates else local_files)
     apply_wallpaper(chosen, chosen.stem.replace("_", " "), config, silent=args.silent)
+    cleanup_cache(config)
 
 def cmd_prev(args, config):
     state = load_state()
@@ -597,6 +712,50 @@ def cmd_list(args):
     for f in sorted(files):
         print(f"  • {f.name} ({f.parent.name})")
 
+def cmd_cache(args, config):
+    modified = False
+    if getattr(args, "max_mb", None) is not None:
+        config["max_cache_mb"] = int(args.max_mb)
+        modified = True
+        print(f"✓ Новый лимит размера кэша сохранён: {args.max_mb} МБ")
+
+    if getattr(args, "max_files", None) is not None:
+        config["max_cached_files"] = int(args.max_files)
+        modified = True
+        print(f"✓ Новый лимит количества файлов в кэше сохранён: {args.max_files} шт.")
+
+    if modified:
+        save_config(config)
+        del_count, del_bytes = cleanup_cache(config)
+        if del_count > 0:
+            print(f"  Очищено по новым лимитам: {del_count} файлов ({del_bytes / (1024*1024):.1f} МБ)")
+
+    if getattr(args, "clean", False):
+        del_count, del_bytes = cleanup_cache(config, force_clean=True)
+        print(f"🧹 Очистка кэша завершена: удалено {del_count} старых обоев ({del_bytes / (1024*1024):.1f} МБ).")
+        print("   (Текущие активные обои и оффлайн-буфер сохранены).")
+
+    cache_count, cache_bytes, _ = get_directory_stats(CACHE_DIR)
+    buf_count, buf_bytes, _ = get_directory_stats(BUFFER_DIR)
+    total_mb = (cache_bytes + buf_bytes) / (1024 * 1024)
+    cache_mb = cache_bytes / (1024 * 1024)
+    buf_mb = buf_bytes / (1024 * 1024)
+
+    max_mb = config.get("max_cache_mb", 80)
+    max_files = config.get("max_cached_files", 15)
+
+    print("┌────────────────────────────────────────────────────────┐")
+    print("│         OMNIWALL: СОСТОЯНИЕ КЭША И ХРАНИЛИЩА           │")
+    print("└────────────────────────────────────────────────────────┘")
+    print(f"  Кэш обоев      : {cache_count} файлов ({cache_mb:.1f} МБ / лимит {max_mb} МБ)")
+    print(f"  Оффлайн-буфер  : {buf_count} файлов ({buf_mb:.1f} МБ / цель {config.get('buffer_size', 5)} шт.)")
+    print(f"  Всего занято   : {total_mb:.1f} МБ")
+    print(f"  Лимиты         : {max_mb} МБ, максимум {max_files} файлов в кэше")
+    print("\nКоманды управления кэшем:")
+    print("  omniwall cache --clean            # Удалить все старые обои кроме текущих")
+    print("  omniwall cache --max-mb 50        # Ограничить кэш 50 мегабайтами")
+    print("  omniwall cache --max-files 10     # Хранить не более 10 последних обоев")
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="omniwall",
@@ -613,6 +772,9 @@ def build_parser():
   omniwall next --reset-tag               Сбросить закрепление и вернуться к Warhammer 40k
   omniwall tag "киберпанк"                Закрепить тег без немедленной смены обоев
   omniwall tag                            Показать текущий активный закреплённый тег
+  omniwall cache                          Показать занятое место и статус кэша
+  omniwall cache --clean                  Очистить старые файлы кэша (освободить диск)
+  omniwall cache --max-mb 50              Установить лимит кэша в 50 МБ
   omniwall schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
   omniwall schedule 6h                    Настроить смену обоев каждые 6 часов
   omniwall buffer                         Проверить статус оффлайн-буфера
@@ -640,6 +802,12 @@ def build_parser():
     parser_tag.add_argument("tag_name", nargs="?", type=str, help="Название тега (RU или EN), например: 'dota 2', 'криг', 'cyberpunk'")
     parser_tag.add_argument("-a", "--apply", action="store_true", help="Сразу скачать и применить новые обои по этому тегу")
     parser_tag.add_argument("--reset", action="store_true", help="Сбросить закрепление и вернуться к темам по умолчанию")
+
+    # Command: cache
+    parser_cache = subparsers.add_parser("cache", help="Управление размером кэша и оптимизация дискового пространства")
+    parser_cache.add_argument("--clean", action="store_true", help="Принудительно удалить все старые обои (кроме текущих и буфера)")
+    parser_cache.add_argument("--max-mb", type=int, help="Задать максимальный размер кэша в мегабайтах (например: 50, 80, 100)")
+    parser_cache.add_argument("--max-files", type=int, help="Задать максимальное количество файлов в кэше (например: 10, 15)")
 
     # Command: schedule
     parser_sched = subparsers.add_parser("schedule", help="Настроить время смены обоев (systemd таймер)")
@@ -680,6 +848,8 @@ def main():
         cmd_next(args, config)
     elif args.command in ("tag", "set-tag"):
         cmd_tag(args, config)
+    elif args.command in ("cache", "clean"):
+        cmd_cache(args, config)
     elif args.command in ("schedule", "time", "timer"):
         cmd_schedule(args, config)
     elif args.command in ("buffer", "sync"):
