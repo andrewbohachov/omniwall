@@ -449,7 +449,7 @@ WantedBy=timers.target
 # ----------------- КОМАНДЫ CLI -----------------
 
 def cmd_next(args, config):
-    raw_query = args.tag or args.query
+    raw_query = getattr(args, "tag", None)
     if raw_query:
         query = translate_tag(raw_query)
         print(f"Поиск обоев по тегу: '{raw_query}' (EN: '{query}')")
@@ -530,7 +530,7 @@ def cmd_schedule(args, config):
     update_schedule(args.time, config)
 
 def cmd_list(args):
-    files = get_local_wallpapers(filter_query=args.tag or args.query)
+    files = get_local_wallpapers(filter_query=getattr(args, "tag", None))
     if not files:
         print("Локальная библиотека пуста.")
         return
