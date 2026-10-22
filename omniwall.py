@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-grimwall / wallpapers / w40k-wallpaper:
-Cross-Desktop 4K Wallpaper Rotator for Linux (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, feh).
+OmniWall:
+Cross-Desktop 4K Wallpaper Rotator for Linux (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, X11/feh).
 
 Features:
 - Multi-DE auto-detection: KDE Plasma, GNOME (light/dark), XFCE, Cinnamon, MATE, Wayland (swww), i3/X11 (feh, nitrogen)
-- Custom schedule CLI: easily set wallpaper rotation time (e.g. 'wallpapers schedule 15:30' or 'every 6h')
+- Custom schedule CLI: easily set wallpaper rotation time (e.g. 'omniwall schedule 15:30' or 'every 6h')
 - Multi-source image fetching (Wallhaven API + Bing HD Engine)
 - Bilingual tag support (Russian & English with smart auto-translation)
 - Configurable offline buffer (e.g., 5-10 pre-downloaded wallpapers)
@@ -25,13 +25,13 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-CONFIG_DIR = Path.home() / ".config" / "w40k-wallpaper"
-CACHE_DIR = Path.home() / ".local" / "share" / "w40k-wallpaper" / "wallpapers"
-BUFFER_DIR = Path.home() / ".local" / "share" / "w40k-wallpaper" / "buffer"
+CONFIG_DIR = Path.home() / ".config" / "omniwall"
+CACHE_DIR = Path.home() / ".local" / "share" / "omniwall" / "wallpapers"
+BUFFER_DIR = Path.home() / ".local" / "share" / "omniwall" / "buffer"
 STATE_FILE = CONFIG_DIR / "state.json"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
-TIMER_FILE = SYSTEMD_USER_DIR / "w40k-wallpaper.timer"
+TIMER_FILE = SYSTEMD_USER_DIR / "omniwall.timer"
 
 DEFAULT_CONFIG = {
     "min_resolution": "3840x2160",
@@ -141,7 +141,7 @@ def translate_tag(tag):
 def notify(title, message):
     try:
         subprocess.run(
-            ["notify-send", "-a", "Grimwall", "-i", "preferences-desktop-wallpaper", title, message],
+            ["notify-send", "-a", "OmniWall", "-i", "preferences-desktop-wallpaper", title, message],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
@@ -152,11 +152,6 @@ def notify(title, message):
 # ----------------- КРОСС-ОКРУЖЕНИЕ (DE DETECTION) -----------------
 
 def detect_and_apply_wallpaper(image_path):
-    """
-    Автоматически определяет графическое окружение пользователя
-    (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, feh, nitrogen)
-    и применяет обои соответствующим нативным способом.
-    """
     abs_path = Path(image_path).resolve()
     file_uri = f"file://{abs_path}"
     de = (os.environ.get("XDG_CURRENT_DESKTOP") or os.environ.get("DESKTOP_SESSION") or "").lower()
@@ -164,7 +159,7 @@ def detect_and_apply_wallpaper(image_path):
     # 1. KDE Plasma
     if "kde" in de or "plasma" in de or shutil.which("plasma-apply-wallpaperimage"):
         try:
-            res = subprocess.run(["plasma-apply-wallpaperimage", str(abs_path)], capture_output=True, text=True, check=True)
+            subprocess.run(["plasma-apply-wallpaperimage", str(abs_path)], capture_output=True, text=True, check=True)
             return True, "KDE Plasma"
         except Exception:
             pass
@@ -172,7 +167,6 @@ def detect_and_apply_wallpaper(image_path):
     # 2. GNOME / Ubuntu Desktop / Pop!_OS / Budgie
     if any(x in de for x in ["gnome", "ubuntu", "unity", "budgie", "pop"]) or shutil.which("gsettings"):
         try:
-            # Устанавливаем и для светлой темы, и для темной (GNOME 42+)
             subprocess.run(["gsettings", "set", "org.gnome.desktop.background", "picture-uri", file_uri], check=True, capture_output=True)
             subprocess.run(["gsettings", "set", "org.gnome.desktop.background", "picture-uri-dark", file_uri], check=True, capture_output=True)
             return True, "GNOME"
@@ -248,7 +242,7 @@ def apply_wallpaper(image_path, title=None, config=None, silent=False):
         save_state(state)
 
         if not silent and config and config.get("desktop_notifications", True):
-            notify("Обои обновлены", f"{title or Path(image_path).stem}\n[{env_name}]")
+            notify("OmniWall", f"{title or Path(image_path).stem}\n[{env_name}]")
         print(f"✓ Обои успешно применены ({env_name}): {image_path}")
         return True
     else:
@@ -258,7 +252,7 @@ def apply_wallpaper(image_path, title=None, config=None, silent=False):
 # ----------------- ПРОВАЙДЕРЫ ОБОЕВ -----------------
 
 def fetch_wallhaven(query, min_res, ratio, purity="100"):
-    headers = {"User-Agent": "Mozilla/5.0 grimwall/2.0"}
+    headers = {"User-Agent": "Mozilla/5.0 omniwall/1.0"}
     encoded_q = urllib.parse.quote(query)
     url = (
         f"https://wallhaven.cc/api/v1/search?"
@@ -398,17 +392,8 @@ def get_local_wallpapers(filter_query=None):
 # ----------------- УПРАВЛЕНИЕ РАСПИСАНИЕМ (SCHEDULE) -----------------
 
 def update_schedule(time_str, config):
-    """
-    Настраивает расписание systemd таймера.
-    Поддерживает форматы:
-    - Четкое время: "12:00", "08:30", "19:45" (ежедневно в это время)
-    - Интервалы: "12h", "6h", "2h", "1h" (каждые N часов)
-    """
     clean_time = time_str.strip().lower()
-    
-    # 1. Интервал (например 6h, 12h)
     interval_match = re.match(r"^(\d+)\s*(h|ч|hour|hours)$", clean_time)
-    # 2. Время суток (например 12:00, 9:30)
     time_match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", clean_time)
 
     if interval_match:
@@ -423,18 +408,17 @@ def update_schedule(time_str, config):
     else:
         print(f"Ошибка формата времени: '{time_str}'.", file=sys.stderr)
         print("Примеры правильного формата:", file=sys.stderr)
-        print("  wallpapers schedule 15:30    (каждый день в 15:30)", file=sys.stderr)
-        print("  wallpapers schedule 09:00    (каждый день в 09:00)", file=sys.stderr)
-        print("  wallpapers schedule 6h       (каждые 6 часов)", file=sys.stderr)
+        print("  omniwall schedule 15:30    (каждый день в 15:30)", file=sys.stderr)
+        print("  omniwall schedule 09:00    (каждый день в 09:00)", file=sys.stderr)
+        print("  omniwall schedule 6h       (каждые 6 часов)", file=sys.stderr)
         return False
 
     config["schedule"] = clean_time
     save_config(config)
 
-    # Обновляем systemd таймер
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
     timer_content = f"""[Unit]
-Description=Daily timer for Wallpaper Rotator ({desc_text})
+Description=Daily timer for OmniWall Wallpaper Rotator ({desc_text})
 
 [Timer]
 OnCalendar={calendar_rule}
@@ -449,16 +433,14 @@ WantedBy=timers.target
     print(f"✓ Расписание успешно настроено: {desc_text}")
     print(f"  Файл таймера: {TIMER_FILE}")
 
-    # Перезагружаем systemd, если таймер был активирован
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
-        # Проверяем, запущен ли таймер
-        check = subprocess.run(["systemctl", "--user", "is-active", "w40k-wallpaper.timer"], capture_output=True, text=True)
+        check = subprocess.run(["systemctl", "--user", "is-active", "omniwall.timer"], capture_output=True, text=True)
         if "active" in check.stdout:
-            subprocess.run(["systemctl", "--user", "restart", "w40k-wallpaper.timer"], check=False)
+            subprocess.run(["systemctl", "--user", "restart", "omniwall.timer"], check=False)
             print("  ✓ Активный таймер systemd перезапущен с новым временем.")
         else:
-            print("  (Таймер пока не включен. Для старта выполните: systemctl --user enable --now w40k-wallpaper.timer)")
+            print("  (Таймер пока не включен. Для старта выполните: systemctl --user enable --now omniwall.timer)")
     except Exception:
         pass
 
@@ -477,7 +459,6 @@ def cmd_next(args, config):
     min_res = args.resolution or config.get("min_resolution", "3840x2160")
     ratio = args.ratio or config.get("ratios", "16x9")
 
-    # 1. Попытка скачать свежее из сети
     if not args.local:
         fresh = fetch_from_any_source(query, config, min_res=min_res, ratio=ratio)
         if fresh:
@@ -488,7 +469,6 @@ def cmd_next(args, config):
                 sync_buffer(target_buffer, config)
             return
 
-    # 2. Локальный кэш / буфер
     local_files = get_local_wallpapers(filter_query=raw_query)
     if not local_files:
         local_files = get_local_wallpapers()
@@ -522,7 +502,7 @@ def cmd_current(args):
         print("Текущие обои не зафиксированы утилитой.")
         return
     print("┌────────────────────────────────────────────────────────┐")
-    print("│                 ТЕКУЩИЕ ОБОИ РАБОЧЕГО СТОЛА            │")
+    print("│             OMNIWALL: ТЕКУЩИЕ ОБОИ РАБОЧЕГО СТОЛА      │")
     print("└────────────────────────────────────────────────────────┘")
     print(f"  Название   : {curr.get('title')}")
     print(f"  Окружение  : {curr.get('environment', 'KDE/GNOME')}")
@@ -543,9 +523,9 @@ def cmd_schedule(args, config):
         curr_sched = config.get("schedule", "12:00")
         print(f"Текущее расписание: {curr_sched}")
         print("Чтобы изменить расписание, укажите время. Например:")
-        print("  wallpapers schedule 15:30   (каждый день в 15:30)")
-        print("  wallpapers schedule 08:00   (каждый день в 08:00)")
-        print("  wallpapers schedule 6h      (каждые 6 часов)")
+        print("  omniwall schedule 15:30   (каждый день в 15:30)")
+        print("  omniwall schedule 08:00   (каждый день в 08:00)")
+        print("  omniwall schedule 6h      (каждые 6 часов)")
         return
     update_schedule(args.time, config)
 
@@ -560,25 +540,25 @@ def cmd_list(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="wallpapers",
+        prog="omniwall",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-⚔️  Grimwall / Wallpapers CLI: Кросс-платформенная 4K-ротация обоев для Linux.
+⚔️  OmniWall: Универсальная 4K-ротация обоев для любого Linux-дистрибутива.
 Поддерживает KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland (swww), X11 (feh).
 Поиск на русском и английском, мульти-источники, оффлайн-буфер и гибкое расписание.
         """,
         epilog="""
 Примеры использования:
-  wallpapers next                           Следующие 4K обои по умолчанию (Warhammer 40,000)
-  wallpapers next --tag "дота 2"            Поиск по русскому тегу (авто-перевод на EN)
-  wallpapers next --tag "криг" --ratio 16x9 Корпус Смерти Крига строго 16:9
-  wallpapers schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
-  wallpapers schedule 6h                    Настроить смену обоев каждые 6 часов
-  wallpapers buffer                         Проверить статус оффлайн-буфера
-  wallpapers buffer -b 10 --sync            Пополнить буфер до 10 обоев на случай оффлайна
-  wallpapers prev                           Откатить на предыдущие обои
-  wallpapers current                        Показать информацию о текущих обоях
-  wallpapers list                           Показать все сохранённые файлы в кэше
+  omniwall next                           Следующие 4K обои по умолчанию (Warhammer 40,000)
+  omniwall next --tag "дота 2"            Поиск по русскому тегу (авто-перевод на EN)
+  omniwall next --tag "криг" --ratio 16x9 Корпус Смерти Крига строго 16:9
+  omniwall schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
+  omniwall schedule 6h                    Настроить смену обоев каждые 6 часов
+  omniwall buffer                         Проверить статус оффлайн-буфера
+  omniwall buffer -b 10 --sync            Пополнить буфер до 10 обоев на случай оффлайна
+  omniwall prev                           Откатить на предыдущие обои
+  omniwall current                        Показать информацию о текущих обоях
+  omniwall list                           Показать все сохранённые файлы в кэше
         """
     )
 

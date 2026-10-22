@@ -3,6 +3,7 @@
     "ratios": "16x9",
     "purity": "100",
     "buffer_size": 5,
+    "schedule": "12:00",
     "sources": [
         "wallhaven",
         "bing"
@@ -16,6 +17,5 @@
         "Black Templars",
         "Dreadnought warhammer"
     ],
-    "desktop_notifications": true,
-    "apply_command": "plasma-apply-wallpaperimage"
+    "desktop_notifications": true
 }

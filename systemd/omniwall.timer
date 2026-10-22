@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily timer for Warhammer 40,000 wallpaper rotation (12:00 PM)
+Description=Daily timer for OmniWall Wallpaper Rotator (12:00 PM)
 
 [Timer]
 OnCalendar=*-*-* 12:00:00
