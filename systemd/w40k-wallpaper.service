@@ -1,0 +1,10 @@
+[Unit]
+Description=Warhammer 40,000 4K Daily Wallpaper Rotator
+Documentation=https://github.com/chelsea/w40k-wallpaper
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/w40k-wallpaper next
+StandardOutput=journal
+StandardError=journal

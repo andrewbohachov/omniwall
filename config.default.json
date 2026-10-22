@@ -1,0 +1,17 @@
+{
+    "min_resolution": "3840x2160",
+    "ratios": "16x9",
+    "purity": "100",
+    "tags": ["id:2143"],
+    "search_queries": [
+        "id:2143",
+        "Astra Militarum",
+        "Death Korps of Krieg",
+        "Iron Hands",
+        "Salamanders 40k",
+        "Black Templars",
+        "Dreadnought warhammer"
+    ],
+    "desktop_notifications": true,
+    "apply_command": "plasma-apply-wallpaperimage"
+}
