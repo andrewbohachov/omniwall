@@ -346,7 +346,12 @@ def sync_buffer(target_count, config, custom_tag=None):
         return
 
     print(f"Пополнение буфера: скачивание {needed} обоев (цель: {target_count})...")
-    queries = [custom_tag] if custom_tag else config.get("default_queries", ["Warhammer 40000"])
+    if custom_tag:
+        queries = [custom_tag]
+    elif config.get("active_tag"):
+        queries = [config.get("active_tag")]
+    else:
+        queries = config.get("default_queries", ["Warhammer 40000"])
 
     added = 0
     attempts = 0
@@ -449,12 +454,29 @@ WantedBy=timers.target
 # ----------------- КОМАНДЫ CLI -----------------
 
 def cmd_next(args, config):
+    if getattr(args, "reset_tag", False):
+        if "active_tag" in config:
+            del config["active_tag"]
+            save_config(config)
+            print("🔄 Закрепление тега сброшено. Возврат к темам по умолчанию (Warhammer 40,000).")
+
     raw_query = getattr(args, "tag", None)
     if raw_query:
+        # Пользователь явно передал тег: закрепляем его в конфиге
+        config["active_tag"] = raw_query
+        save_config(config)
         query = translate_tag(raw_query)
         print(f"Поиск обоев по тегу: '{raw_query}' (EN: '{query}')")
+        print(f"📌 Тег '{raw_query}' закреплён! Последующие вызовы 'next' будут искать по нему.")
     else:
-        query = translate_tag(random.choice(config.get("default_queries", ["Warhammer 40000"])))
+        # Проверяем наличие закреплённого тега в конфигурации
+        pinned = config.get("active_tag")
+        if pinned:
+            raw_query = pinned
+            query = translate_tag(pinned)
+            print(f"Используется закреплённый тег: '{pinned}' (EN: '{query}')")
+        else:
+            query = translate_tag(random.choice(config.get("default_queries", ["Warhammer 40000"])))
 
     min_res = args.resolution or config.get("min_resolution", "3840x2160")
     ratio = args.ratio or config.get("ratios", "16x9")
@@ -495,19 +517,56 @@ def cmd_prev(args, config):
     else:
         print("Предыдущий файл больше не найден на диске.")
 
-def cmd_current(args):
+def cmd_tag(args, config):
+    if getattr(args, "reset", False):
+        if "active_tag" in config:
+            del config["active_tag"]
+            save_config(config)
+        print("🔄 Закрепление снято. Возврат к темам по умолчанию (Warhammer 40,000).")
+        return
+
+    if args.tag_name:
+        tag_val = args.tag_name.strip()
+        config["active_tag"] = tag_val
+        save_config(config)
+        en = translate_tag(tag_val)
+        print(f"📌 Тег '{tag_val}' (EN: '{en}') успешно закреплён!")
+        print("Все последующие вызовы 'omniwall next' и ежедневный таймер будут использовать этот тег.")
+        if getattr(args, "apply", False):
+            setattr(args, "tag", tag_val)
+            cmd_next(args, config)
+    else:
+        active = config.get("active_tag")
+        if active:
+            en = translate_tag(active)
+            print(f"📌 Текущий закреплённый тег: '{active}' (EN: '{en}')")
+        else:
+            print("Тег не закреплен (ротация по темам по умолчанию: Warhammer 40,000).")
+        print("\nИспользование:")
+        print("  omniwall tag \"dota 2\"         # Закрепить тему 'dota 2'")
+        print("  omniwall tag \"криг\" --apply   # Закрепить и сразу применить новые обои")
+        print("  omniwall tag --reset         # Сбросить закрепление и вернуться к Warhammer 40k")
+
+def cmd_current(args, config=None):
     state = load_state()
     curr = state.get("current")
     if not curr:
         print("Текущие обои не зафиксированы утилитой.")
         return
+    if config is None:
+        config = load_config()
     print("┌────────────────────────────────────────────────────────┐")
     print("│             OMNIWALL: ТЕКУЩИЕ ОБОИ РАБОЧЕГО СТОЛА      │")
     print("└────────────────────────────────────────────────────────┘")
-    print(f"  Название   : {curr.get('title')}")
-    print(f"  Окружение  : {curr.get('environment', 'KDE/GNOME')}")
-    print(f"  Файл       : {curr.get('path')}")
-    print(f"  Установлен : {curr.get('applied_at')}")
+    print(f"  Название     : {curr.get('title')}")
+    print(f"  Окружение    : {curr.get('environment', 'KDE/GNOME')}")
+    pinned = config.get("active_tag")
+    if pinned:
+        print(f"  Активный тег : {pinned} (закреплён 📌)")
+    else:
+        print(f"  Активный тег : Ротация по умолчанию (Warhammer 40,000)")
+    print(f"  Файл         : {curr.get('path')}")
+    print(f"  Установлен   : {curr.get('applied_at')}")
 
 def cmd_buffer(args, config):
     files = get_buffer_files()
@@ -549,9 +608,11 @@ def build_parser():
         """,
         epilog="""
 Примеры использования:
-  omniwall next                           Следующие 4K обои по умолчанию (Warhammer 40,000)
-  omniwall next --tag "дота 2"            Поиск по русскому тегу (авто-перевод на EN)
-  omniwall next --tag "криг" --ratio 16x9 Корпус Смерти Крига строго 16:9
+  omniwall next                           Следующие 4K обои (по закреплённому тегу или Warhammer 40k)
+  omniwall next --tag "дота 2"            Закрепить тег "дота 2" и сразу поставить обои
+  omniwall next --reset-tag               Сбросить закрепление и вернуться к Warhammer 40k
+  omniwall tag "киберпанк"                Закрепить тег без немедленной смены обоев
+  omniwall tag                            Показать текущий активный закреплённый тег
   omniwall schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
   omniwall schedule 6h                    Настроить смену обоев каждые 6 часов
   omniwall buffer                         Проверить статус оффлайн-буфера
@@ -566,12 +627,19 @@ def build_parser():
 
     # Command: next
     parser_next = subparsers.add_parser("next", help="Установить следующие обои (по умолчанию)")
-    parser_next.add_argument("-t", "--tag", "-q", "--query", type=str, help="Тег на русском или английском (например: вархаммер, 'дота 2', криг, astartes)")
+    parser_next.add_argument("-t", "--tag", "-q", "--query", type=str, help="Тег на русском или английском (закрепляется для последующих вызовов next)")
+    parser_next.add_argument("--reset-tag", action="store_true", help="Сбросить закреплённый тег и вернуться к темам по умолчанию")
     parser_next.add_argument("-r", "--ratio", type=str, help="Соотношение сторон (например: 16x9, 16x10, 21x9, 32x9)")
     parser_next.add_argument("--res", "--resolution", dest="resolution", type=str, help="Минимальное разрешение (например: 3840x2160, 2560x1440)")
     parser_next.add_argument("-b", "--buffer", type=int, help="Размер оффлайн-буфера обоев (по умолчанию: 5)")
     parser_next.add_argument("-l", "--local", action="store_true", help="Брать только из оффлайн-буфера/кэша, без интернета")
     parser_next.add_argument("-s", "--silent", action="store_true", help="Не показывать всплывающее уведомление")
+
+    # Command: tag
+    parser_tag = subparsers.add_parser("tag", help="Просмотреть или закрепить основной тег поиска")
+    parser_tag.add_argument("tag_name", nargs="?", type=str, help="Название тега (RU или EN), например: 'dota 2', 'криг', 'cyberpunk'")
+    parser_tag.add_argument("-a", "--apply", action="store_true", help="Сразу скачать и применить новые обои по этому тегу")
+    parser_tag.add_argument("--reset", action="store_true", help="Сбросить закрепление и вернуться к темам по умолчанию")
 
     # Command: schedule
     parser_sched = subparsers.add_parser("schedule", help="Настроить время смены обоев (systemd таймер)")
@@ -610,6 +678,8 @@ def main():
 
     if args.command in (None, "next"):
         cmd_next(args, config)
+    elif args.command in ("tag", "set-tag"):
+        cmd_tag(args, config)
     elif args.command in ("schedule", "time", "timer"):
         cmd_schedule(args, config)
     elif args.command in ("buffer", "sync"):
@@ -617,7 +687,7 @@ def main():
     elif args.command in ("prev", "previous"):
         cmd_prev(args, config)
     elif args.command in ("current", "status", "info"):
-        cmd_current(args)
+        cmd_current(args, config)
     elif args.command in ("list", "ls"):
         cmd_list(args)
     else:
