@@ -11,7 +11,7 @@
 ### Вариант 1: Универсальный скрипт (любой Linux-дистрибутив)
 Не требует сборки или прав суперпользователя. Просто выполните:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chelsea/omniwall/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/andrewbohachov/omniwall/main/install.sh | bash
 ```
 
 ### Вариант 2: Готовый `.deb` пакет (Ubuntu, Debian, Linux Mint, Pop!_OS)
@@ -29,7 +29,7 @@ makepkg -si
 
 ### Вариант 4: Через pipx / pip (Python)
 ```bash
-pipx install git+https://github.com/chelsea/omniwall.git
+pipx install git+https://github.com/andrewbohachov/omniwall.git
 ```
 
 ---

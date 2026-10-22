@@ -1,6 +1,6 @@
 [Unit]
 Description=OmniWall 4K Daily Wallpaper Rotator
-Documentation=https://github.com/chelsea/omniwall
+Documentation=https://github.com/andrewbohachov/omniwall
 After=graphical-session.target
 
 [Service]

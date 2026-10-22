@@ -1,10 +1,10 @@
-# Maintainer: Chelsea <chelsea@local>
+# Maintainer: Andrew Bohachov <chelsea@local>
 pkgname=omniwall
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Cross-Desktop 4K Wallpaper Rotator for Linux (KDE, GNOME, XFCE, Wayland)"
 arch=('any')
-url="https://github.com/chelsea/omniwall"
+url="https://github.com/andrewbohachov/omniwall"
 license=('MIT')
 depends=('python')
 optdepends=(

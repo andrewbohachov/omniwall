@@ -7,7 +7,7 @@ set -e
 #   curl -sSL https://raw.githubusercontent.com/<user>/omniwall/main/install.sh | bash
 # ==============================================================================
 
-REPO_RAW_URL="${OMNIWALL_RAW_URL:-https://raw.githubusercontent.com/chelsea/omniwall/main}"
+REPO_RAW_URL="${OMNIWALL_RAW_URL:-https://raw.githubusercontent.com/andrewbohachov/omniwall/main}"
 BIN_DIR="$HOME/.local/bin"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 CONFIG_DIR="$HOME/.config/omniwall"

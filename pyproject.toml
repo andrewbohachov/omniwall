@@ -7,7 +7,7 @@ name = "omniwall"
 version = "1.0.0"
 description = "Cross-Desktop 4K Wallpaper Rotator for Linux (KDE Plasma, GNOME, XFCE, Wayland, X11)"
 readme = "README.md"
-authors = [{ name = "Chelsea", email = "chelsea@local" }]
+authors = [{ name = "Andrew Bohachov", email = "chelsea@local" }]
 license = { text = "MIT" }
 requires-python = ">=3.8"
 keywords = ["wallpaper", "warhammer40k", "linux", "kde", "gnome", "4k"]

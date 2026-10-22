@@ -21,7 +21,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3
-Maintainer: Chelsea <chelsea@local>
+Maintainer: Andrew Bohachov <chelsea@local>
 Description: OmniWall - Cross-Desktop 4K Wallpaper Rotator for Linux
  Automated multi-source 4K wallpaper rotation for KDE, GNOME, XFCE, and Wayland.
 EOF
