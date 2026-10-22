@@ -1,25 +1,31 @@
-# Wallpapers CLI (w40k-wallpaper) ⚔️
+# Grimwall ⚔️
 
-> **Мульти-источниковая CLI-утилита и `systemd` сервис для ежедневной и ручной ротации 4K-обоев на Linux (KDE Plasma & Freedesktop)**
+> **Кросс-десктопная CLI-утилита и `systemd` сервис для ежедневной и ручной ротации 4K-обоев на любом Linux-дистрибутиве (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, X11/feh)**
 
-Изначально спроектирована для автоматической ротации 4K-артов по **Warhammer 40,000**, но поддерживает любые кастомные теги как на **английском**, так и на **русском** языках, агрегацию из нескольких поисковых платформ и настраиваемый **оффлайн-буфер** на случай отсутствия интернета.
+Изначально спроектирована для автоматической ротации 4K-артов по **Warhammer 40,000**, но полностью открыта для любых кастомных тегов (Dota 2, Cyberpunk, Anime, Nature), соотношений сторон и поисковых систем.
 
 ---
 
 ## ✨ Возможности
 
-- **Двуязычный поиск (RU / EN)**: Можно передавать теги на русском (`--tag "вархаммер"`, `--tag "дота 2"`, `--tag "криг"`). Встроен умный локальный словарь для игровых вселенных + автоматический переводчик на английский для любых произвольных слов.
-- **Мульти-источниковая агрегация**: 
-  - **Wallhaven REST API**: официальная база артов с фильтрацией по точным тегам, 4K UHD и соотношению сторон.
-  - **Web 4K Engine (Bing HD)**: поиск оригиналов сверхвысокого разрешения по всей Сети (ArtStation, AlphaCoders, Reddit и др.).
+- **Работает на любом Linux-дистрибутиве и окружении**:
+  - **KDE Plasma** (нативный `plasma-apply-wallpaperimage`)
+  - **GNOME / Ubuntu / Fedora / Pop!_OS** (`gsettings` с поддержкой light & dark режимов)
+  - **Cinnamon & MATE** (Linux Mint)
+  - **XFCE** (`xfconf-query`)
+  - **Wayland тайлинг** (Hyprland, Sway через `swww`)
+  - **X11 оконные менеджеры** (i3, bspwm, Openbox через `feh` или `nitrogen`)
+- **Настройка времени смены обоев через CLI**:
+  - `grimwall schedule 15:30` — задать конкретное время суток
+  - `grimwall schedule 6h` — задать интервал (каждые 6 часов)
+- **Двуязычный поиск (RU / EN)**: Можно писать теги на русском (`--tag "вархаммер"`, `--tag "дота 2"`, `--tag "криг"`). Встроен умный словарь игровых вселенных + автоматический переводчик.
+- **Мульти-источниковая агрегация**:
+  - **Wallhaven REST API**: официальная база артов с точной фильтрацией по 4K и фракциям.
+  - **Web 4K Engine (Bing HD)**: поиск несжатых оригиналов по всей Сети (ArtStation, AlphaCoders, Reddit и др.).
 - **Оффлайн-буфер (Запас на случай отключения сети)**:
-  - Автоматически держит в локальной папке запас из `N` свежих обоев (по умолчанию: 5, настраивается через `--buffer 10` или в конфигурационном файле).
-  - Если интернета не будет 5–10 дней, служба продолжит менять обои каждый день, беря их из буфера.
-- **Качество 4K UHD**: Автоматический фильтр по разрешению `3840×2160` (16:9), `2K`, `Ultrawide 21:9` и выше.
-- **Интерактивный `help`**: Детальная встроенная справка со всеми аргументами и примерами.
-- **Автоматизация по расписанию**: `systemd --user` таймер раз в 24 часа (в 12:00) без прав root.
-- **История и откат**: Команда `wallpapers prev` возвращает предыдущий арт.
-- **Всплывающие уведомления**: Нативное уведомление на рабочий стол с названием арта.
+  - Автоматически держит в локальной папке запас из `N` свежих обоев (по умолчанию: 5, настраивается через `--buffer 10`).
+  - Если интернета не будет несколько дней, служба продолжит исправно менять обои из буфера.
+- **0 МБ RAM в фоне**: Не является демоном. Просыпается на 1.5 секунды через `systemd.timer` (`oneshot`), меняет обои и полностью выгружается из памяти.
 
 ---
 
@@ -28,55 +34,70 @@
 ### Базовые команды:
 ```bash
 # Вывести полную справку со всеми аргументами
-wallpapers --help
+grimwall --help
 
 # Установить следующие случайные обои по умолчанию (Warhammer 40k в 4K)
-wallpapers next
+grimwall next
 
 # Вернуться к предыдущим обоям
-wallpapers prev
+grimwall prev
 
-# Информация о текущих обоях
-wallpapers current
+# Информация о текущих обоях и графическом окружении
+grimwall current
 
-# Список локально сохранённых артов в кэше
-wallpapers list
+# Список сохранённых артов в локальной библиотеке
+grimwall list
+```
+
+### Настройка времени и расписания:
+```bash
+# Менять обои каждый день ровно в 15:30
+grimwall schedule 15:30
+
+# Менять обои каждый день в 09:00 утра
+grimwall schedule 09:00
+
+# Менять обои каждые 6 часов
+grimwall schedule 6h
+
+# Посмотреть текущее расписание
+grimwall schedule
 ```
 
 ### Поиск по тегам (на русском и английском) и фильтры:
 ```bash
 # Поиск по русскоязычным тегам
-wallpapers next --tag "дота 2"
-wallpapers next --tag "криг"
-wallpapers next --tag "космодесант"
-wallpapers next --tag "киберпанк"
+grimwall next --tag "дота 2"
+grimwall next --tag "криг"
+grimwall next --tag "космодесант"
+grimwall next --tag "киберпанк"
 
 # Поиск по англоязычным тегам
-wallpapers next --tag "Black Templars"
-wallpapers next --tag "nature"
+grimwall next --tag "Black Templars"
+grimwall next --tag "nature"
 
 # Фильтр соотношения сторон (16:9, 21:9, 32:9)
-wallpapers next --tag "вархаммер" --ratio 16x9
-wallpapers next --ratio 21x9
+grimwall next --tag "вархаммер" --ratio 16x9
+grimwall next --ratio 21x9
 
 # Минимальное разрешение
-wallpapers next --res 3840x2160    # 4K UHD
-wallpapers next --res 2560x1440    # 2K QHD
+grimwall next --res 3840x2160    # 4K UHD
+grimwall next --res 2560x1440    # 2K QHD
 ```
 
 ### Управление оффлайн-буфером:
 ```bash
-# Проверить статус буфера (сколько обоев лежит про запас)
-wallpapers buffer
+# Проверить статус буфера
+grimwall buffer
 
-# Задать размер буфера в 10 штук и принудительно докачать свежие арты
-wallpapers buffer -b 10 --sync
+# Пополнить буфер до 10 обоев на случай отключения интернета
+grimwall buffer -b 10 --sync
 
 # Заполнить буфер артами по конкретному тегу
-wallpapers buffer -b 7 --sync --tag "вархаммер"
+grimwall buffer -b 7 --sync --tag "вархаммер"
 
 # Использовать только локальный буфер/кэш без выхода в сеть
-wallpapers next --local
+grimwall next --local
 ```
 
 ---
@@ -84,53 +105,19 @@ wallpapers next --local
 ## 🛠️ Установка
 
 ```bash
-git clone https://github.com/yourusername/w40k-wallpaper.git
-cd w40k-wallpaper
+git clone https://github.com/yourusername/grimwall.git
+cd grimwall
 ./install.sh
 ```
 
-Установщик создаёт две команды в `~/.local/bin/`:
+Установщик создаёт три эквивалентные команды в `~/.local/bin/`:
+- `grimwall`
 - `wallpapers`
 - `w40k-wallpaper`
 
-### Включение ежедневного таймера (каждый день в 12:00):
+### Включение таймера автообновления:
 ```bash
 systemctl --user enable --now w40k-wallpaper.timer
-```
-
-### Проверка статуса таймера:
-```bash
-systemctl --user list-timers --all | grep w40k
-```
-
----
-
-## ⚙️ Конфигурация
-
-Файл настроек создается в `~/.config/w40k-wallpaper/config.json`:
-
-```json
-{
-    "min_resolution": "3840x2160",
-    "ratios": "16x9",
-    "purity": "100",
-    "buffer_size": 5,
-    "sources": [
-        "wallhaven",
-        "bing"
-    ],
-    "default_queries": [
-        "id:2143",
-        "Astra Militarum",
-        "Death Korps of Krieg",
-        "Iron Hands Space Marines",
-        "Salamanders 40k",
-        "Black Templars",
-        "Dreadnought warhammer"
-    ],
-    "desktop_notifications": true,
-    "apply_command": "plasma-apply-wallpaperimage"
-}
 ```
 
 ---

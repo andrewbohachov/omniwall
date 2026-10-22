@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-w40k-wallpaper / wallpapers:
-Multi-source 4K Wallpaper Rotator for Linux (KDE Plasma & Freedesktop).
+grimwall / wallpapers / w40k-wallpaper:
+Cross-Desktop 4K Wallpaper Rotator for Linux (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, feh).
+
 Features:
+- Multi-DE auto-detection: KDE Plasma, GNOME (light/dark), XFCE, Cinnamon, MATE, Wayland (swww), i3/X11 (feh, nitrogen)
+- Custom schedule CLI: easily set wallpaper rotation time (e.g. 'wallpapers schedule 15:30' or 'every 6h')
 - Multi-source image fetching (Wallhaven API + Bing HD Engine)
 - Bilingual tag support (Russian & English with smart auto-translation)
 - Configurable offline buffer (e.g., 5-10 pre-downloaded wallpapers)
-- Aspect ratio, resolution, and local fallback controls
-- Systemd timer integration for daily automation at 12:00
+- Zero background memory footprint (pure systemd --user oneshot architecture)
 """
 
 import sys
@@ -15,6 +17,7 @@ import os
 import json
 import random
 import re
+import shutil
 import argparse
 import urllib.request
 import urllib.parse
@@ -27,12 +30,15 @@ CACHE_DIR = Path.home() / ".local" / "share" / "w40k-wallpaper" / "wallpapers"
 BUFFER_DIR = Path.home() / ".local" / "share" / "w40k-wallpaper" / "buffer"
 STATE_FILE = CONFIG_DIR / "state.json"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
+TIMER_FILE = SYSTEMD_USER_DIR / "w40k-wallpaper.timer"
 
 DEFAULT_CONFIG = {
     "min_resolution": "3840x2160",
     "ratios": "16x9",
     "purity": "100",  # SFW
     "buffer_size": 5,  # количество оффлайн-обоев в буфере
+    "schedule": "12:00",  # ежедневное время смены
     "sources": ["wallhaven", "bing"],
     "default_queries": [
         "id:2143",  # Warhammer 40,000 tag
@@ -43,11 +49,9 @@ DEFAULT_CONFIG = {
         "Black Templars",
         "Dreadnought warhammer"
     ],
-    "desktop_notifications": True,
-    "apply_command": "plasma-apply-wallpaperimage"
+    "desktop_notifications": True
 }
 
-# Словарь мгновенного перевода популярных игровых и Warhammer-терминов
 LOCAL_DICTIONARY = {
     "вархаммер": "Warhammer 40000",
     "ваха": "Warhammer 40000",
@@ -97,6 +101,11 @@ def load_config():
     except Exception:
         return DEFAULT_CONFIG
 
+def save_config(config):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
 def load_state():
     if not STATE_FILE.exists():
         return {"current": None, "history": []}
@@ -112,16 +121,10 @@ def save_state(state):
         json.dump(state, f, indent=4, ensure_ascii=False)
 
 def translate_tag(tag):
-    """
-    Автоматически переводит русскоязычные теги на английский:
-    1. Через локальный словарь для точности Warhammer/игр.
-    2. Через бесплатный API MyMemory для любых других произвольных слов.
-    """
     clean_tag = tag.strip().lower()
     if clean_tag in LOCAL_DICTIONARY:
         return LOCAL_DICTIONARY[clean_tag]
     
-    # Проверяем наличие кириллицы
     if re.search(r"[\u0400-\u04FF]", tag):
         try:
             url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(tag)}&langpair=ru|en"
@@ -138,7 +141,7 @@ def translate_tag(tag):
 def notify(title, message):
     try:
         subprocess.run(
-            ["notify-send", "-a", "Wallpapers", "-i", "preferences-desktop-wallpaper", title, message],
+            ["notify-send", "-a", "Grimwall", "-i", "preferences-desktop-wallpaper", title, message],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
@@ -146,36 +149,116 @@ def notify(title, message):
     except Exception:
         pass
 
+# ----------------- КРОСС-ОКРУЖЕНИЕ (DE DETECTION) -----------------
+
+def detect_and_apply_wallpaper(image_path):
+    """
+    Автоматически определяет графическое окружение пользователя
+    (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, feh, nitrogen)
+    и применяет обои соответствующим нативным способом.
+    """
+    abs_path = Path(image_path).resolve()
+    file_uri = f"file://{abs_path}"
+    de = (os.environ.get("XDG_CURRENT_DESKTOP") or os.environ.get("DESKTOP_SESSION") or "").lower()
+
+    # 1. KDE Plasma
+    if "kde" in de or "plasma" in de or shutil.which("plasma-apply-wallpaperimage"):
+        try:
+            res = subprocess.run(["plasma-apply-wallpaperimage", str(abs_path)], capture_output=True, text=True, check=True)
+            return True, "KDE Plasma"
+        except Exception:
+            pass
+
+    # 2. GNOME / Ubuntu Desktop / Pop!_OS / Budgie
+    if any(x in de for x in ["gnome", "ubuntu", "unity", "budgie", "pop"]) or shutil.which("gsettings"):
+        try:
+            # Устанавливаем и для светлой темы, и для темной (GNOME 42+)
+            subprocess.run(["gsettings", "set", "org.gnome.desktop.background", "picture-uri", file_uri], check=True, capture_output=True)
+            subprocess.run(["gsettings", "set", "org.gnome.desktop.background", "picture-uri-dark", file_uri], check=True, capture_output=True)
+            return True, "GNOME"
+        except Exception:
+            pass
+
+    # 3. Cinnamon (Linux Mint)
+    if "cinnamon" in de:
+        try:
+            subprocess.run(["gsettings", "set", "org.cinnamon.desktop.background", "picture-uri", file_uri], check=True, capture_output=True)
+            return True, "Cinnamon"
+        except Exception:
+            pass
+
+    # 4. MATE Desktop
+    if "mate" in de:
+        try:
+            subprocess.run(["gsettings", "set", "org.mate.background", "picture-filename", str(abs_path)], check=True, capture_output=True)
+            return True, "MATE"
+        except Exception:
+            pass
+
+    # 5. XFCE Desktop
+    if "xfce" in de and shutil.which("xfconf-query"):
+        try:
+            res = subprocess.run(["xfconf-query", "-c", "xfce4-desktop", "-l"], capture_output=True, text=True)
+            applied = False
+            for prop in res.stdout.splitlines():
+                if "last-image" in prop or "image-path" in prop:
+                    subprocess.run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", str(abs_path)], check=False)
+                    applied = True
+            if applied:
+                return True, "XFCE"
+        except Exception:
+            pass
+
+    # 6. Wayland тайлинговые оконные менеджеры (Hyprland, Sway via swww)
+    if shutil.which("swww"):
+        try:
+            subprocess.run(["swww", "img", str(abs_path)], check=True, capture_output=True)
+            return True, "swww (Wayland)"
+        except Exception:
+            pass
+
+    # 7. X11 оконные менеджеры (i3, bspwm, Openbox, Awesome) via feh или nitrogen
+    if shutil.which("feh"):
+        try:
+            subprocess.run(["feh", "--bg-fill", str(abs_path)], check=True, capture_output=True)
+            return True, "feh (X11)"
+        except Exception:
+            pass
+    if shutil.which("nitrogen"):
+        try:
+            subprocess.run(["nitrogen", "--set-zoom-fill", str(abs_path)], check=True, capture_output=True)
+            return True, "nitrogen (X11)"
+        except Exception:
+            pass
+
+    return False, "Неизвестное окружение"
+
 def apply_wallpaper(image_path, title=None, config=None, silent=False):
-    cmd = config.get("apply_command", "plasma-apply-wallpaperimage") if config else "plasma-apply-wallpaperimage"
-    try:
-        subprocess.run([cmd, str(image_path)], capture_output=True, text=True, check=True)
+    success, env_name = detect_and_apply_wallpaper(image_path)
+    if success:
         state = load_state()
         state["history"].append(state.get("current"))
         state["history"] = [h for h in state["history"] if h][-50:]
         state["current"] = {
             "path": str(image_path),
             "title": title or Path(image_path).name,
-            "applied_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "applied_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "environment": env_name
         }
         save_state(state)
 
         if not silent and config and config.get("desktop_notifications", True):
-            notify("Обои обновлены", f"{title or Path(image_path).stem}")
-        print(f"✓ Обои успешно применены: {image_path}")
+            notify("Обои обновлены", f"{title or Path(image_path).stem}\n[{env_name}]")
+        print(f"✓ Обои успешно применены ({env_name}): {image_path}")
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка при смене обоев: {e.stderr}", file=sys.stderr)
-        return False
-    except FileNotFoundError:
-        print(f"Команда '{cmd}' не найдена в вашей графической среде.", file=sys.stderr)
+    else:
+        print(f"Ошибка: не удалось установить обои автоматически для вашего окружения.", file=sys.stderr)
         return False
 
 # ----------------- ПРОВАЙДЕРЫ ОБОЕВ -----------------
 
 def fetch_wallhaven(query, min_res, ratio, purity="100"):
-    """Провайдер 1: Wallhaven REST API"""
-    headers = {"User-Agent": "Mozilla/5.0 w40k-wallpaper/2.0"}
+    headers = {"User-Agent": "Mozilla/5.0 grimwall/2.0"}
     encoded_q = urllib.parse.quote(query)
     url = (
         f"https://wallhaven.cc/api/v1/search?"
@@ -204,7 +287,6 @@ def fetch_wallhaven(query, min_res, ratio, purity="100"):
     return target_file, f"{query} [Wallhaven {choice['resolution']}]"
 
 def fetch_bing_hd(query, min_res=None):
-    """Провайдер 2: Поисковый движок сверхвысокого разрешения (Bing HD Image Engine)"""
     headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"}
     search_term = f"{query} 4k wallpaper 3840x2160 uhd"
     url = f"https://www.bing.com/images/search?q={urllib.parse.quote(search_term)}&form=HDRSC2&first=1"
@@ -214,7 +296,6 @@ def fetch_bing_hd(query, min_res=None):
         html = resp.read().decode("utf-8", errors="ignore")
 
     matches = re.findall(r'murl&quot;:&quot;(https?://[^\&]+)&quot;', html)
-    # Фильтруем валидные картинки
     valid_links = [m for m in matches if any(m.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])]
     if not valid_links:
         return None
@@ -234,9 +315,6 @@ def fetch_bing_hd(query, min_res=None):
     return None
 
 def fetch_from_any_source(query, config, min_res=None, ratio=None):
-    """
-    По очереди опрашивает настроенные источники (Wallhaven, Bing HD Engine).
-    """
     min_res = min_res or config.get("min_resolution", "3840x2160")
     ratio = ratio or config.get("ratios", "16x9")
     sources = config.get("sources", ["wallhaven", "bing"])
@@ -252,8 +330,7 @@ def fetch_from_any_source(query, config, min_res=None, ratio=None):
                 res = fetch_bing_hd(query, min_res)
                 if res:
                     return res
-        except Exception as e:
-            # пробуем следующий источник
+        except Exception:
             continue
     return None
 
@@ -266,9 +343,6 @@ def get_buffer_files():
     return [p for p in BUFFER_DIR.iterdir() if p.is_file() and p.suffix.lower() in exts]
 
 def sync_buffer(target_count, config, custom_tag=None):
-    """
-    Пополняет локальный буфер до target_count обоев на случай отсутствия интернета.
-    """
     BUFFER_DIR.mkdir(parents=True, exist_ok=True)
     current_files = get_buffer_files()
     needed = target_count - len(current_files)
@@ -291,8 +365,6 @@ def sync_buffer(target_count, config, custom_tag=None):
                 src_path, title = result
                 dest_file = BUFFER_DIR / f"buffer_{src_path.name}"
                 if not dest_file.exists():
-                    # копируем в буфер
-                    import shutil
                     shutil.copy2(src_path, dest_file)
                     added += 1
                     print(f"  + [{added}/{needed}] Добавлено в буфер: {title}")
@@ -323,6 +395,75 @@ def get_local_wallpapers(filter_query=None):
                         files.append(p)
     return files
 
+# ----------------- УПРАВЛЕНИЕ РАСПИСАНИЕМ (SCHEDULE) -----------------
+
+def update_schedule(time_str, config):
+    """
+    Настраивает расписание systemd таймера.
+    Поддерживает форматы:
+    - Четкое время: "12:00", "08:30", "19:45" (ежедневно в это время)
+    - Интервалы: "12h", "6h", "2h", "1h" (каждые N часов)
+    """
+    clean_time = time_str.strip().lower()
+    
+    # 1. Интервал (например 6h, 12h)
+    interval_match = re.match(r"^(\d+)\s*(h|ч|hour|hours)$", clean_time)
+    # 2. Время суток (например 12:00, 9:30)
+    time_match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", clean_time)
+
+    if interval_match:
+        hours = interval_match.group(1)
+        calendar_rule = f"*-*-* 00/{hours}:00:00"
+        desc_text = f"каждые {hours} ч."
+    elif time_match:
+        hh = time_match.group(1).zfill(2)
+        mm = time_match.group(2)
+        calendar_rule = f"*-*-* {hh}:{mm}:00"
+        desc_text = f"каждый день в {hh}:{mm}"
+    else:
+        print(f"Ошибка формата времени: '{time_str}'.", file=sys.stderr)
+        print("Примеры правильного формата:", file=sys.stderr)
+        print("  wallpapers schedule 15:30    (каждый день в 15:30)", file=sys.stderr)
+        print("  wallpapers schedule 09:00    (каждый день в 09:00)", file=sys.stderr)
+        print("  wallpapers schedule 6h       (каждые 6 часов)", file=sys.stderr)
+        return False
+
+    config["schedule"] = clean_time
+    save_config(config)
+
+    # Обновляем systemd таймер
+    SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
+    timer_content = f"""[Unit]
+Description=Daily timer for Wallpaper Rotator ({desc_text})
+
+[Timer]
+OnCalendar={calendar_rule}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+    with open(TIMER_FILE, "w", encoding="utf-8") as f:
+        f.write(timer_content)
+
+    print(f"✓ Расписание успешно настроено: {desc_text}")
+    print(f"  Файл таймера: {TIMER_FILE}")
+
+    # Перезагружаем systemd, если таймер был активирован
+    try:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
+        # Проверяем, запущен ли таймер
+        check = subprocess.run(["systemctl", "--user", "is-active", "w40k-wallpaper.timer"], capture_output=True, text=True)
+        if "active" in check.stdout:
+            subprocess.run(["systemctl", "--user", "restart", "w40k-wallpaper.timer"], check=False)
+            print("  ✓ Активный таймер systemd перезапущен с новым временем.")
+        else:
+            print("  (Таймер пока не включен. Для старта выполните: systemctl --user enable --now w40k-wallpaper.timer)")
+    except Exception:
+        pass
+
+    return True
+
 # ----------------- КОМАНДЫ CLI -----------------
 
 def cmd_next(args, config):
@@ -336,19 +477,18 @@ def cmd_next(args, config):
     min_res = args.resolution or config.get("min_resolution", "3840x2160")
     ratio = args.ratio or config.get("ratios", "16x9")
 
-    # 1. Если не указан строгий оффлайн, пытаемся скачать свежее
+    # 1. Попытка скачать свежее из сети
     if not args.local:
         fresh = fetch_from_any_source(query, config, min_res=min_res, ratio=ratio)
         if fresh:
             path, title = fresh
             apply_wallpaper(path, title, config, silent=args.silent)
-            # В фоновом режиме поддерживаем буфер полным
             target_buffer = args.buffer or config.get("buffer_size", 5)
             if len(get_buffer_files()) < target_buffer:
                 sync_buffer(target_buffer, config)
             return
 
-    # 2. Если сети нет или включен --local, берем из буфера или локальной коллекции
+    # 2. Локальный кэш / буфер
     local_files = get_local_wallpapers(filter_query=raw_query)
     if not local_files:
         local_files = get_local_wallpapers()
@@ -385,6 +525,7 @@ def cmd_current(args):
     print("│                 ТЕКУЩИЕ ОБОИ РАБОЧЕГО СТОЛА            │")
     print("└────────────────────────────────────────────────────────┘")
     print(f"  Название   : {curr.get('title')}")
+    print(f"  Окружение  : {curr.get('environment', 'KDE/GNOME')}")
     print(f"  Файл       : {curr.get('path')}")
     print(f"  Установлен : {curr.get('applied_at')}")
 
@@ -396,6 +537,17 @@ def cmd_buffer(args, config):
         print(f"  [{idx}] {f.name}")
     if args.sync or len(files) < target:
         sync_buffer(target, config, custom_tag=args.tag)
+
+def cmd_schedule(args, config):
+    if not args.time:
+        curr_sched = config.get("schedule", "12:00")
+        print(f"Текущее расписание: {curr_sched}")
+        print("Чтобы изменить расписание, укажите время. Например:")
+        print("  wallpapers schedule 15:30   (каждый день в 15:30)")
+        print("  wallpapers schedule 08:00   (каждый день в 08:00)")
+        print("  wallpapers schedule 6h      (каждые 6 часов)")
+        return
+    update_schedule(args.time, config)
 
 def cmd_list(args):
     files = get_local_wallpapers(filter_query=args.tag or args.query)
@@ -411,18 +563,19 @@ def build_parser():
         prog="wallpapers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-⚔️  Wallpapers CLI: Умная мульти-источниковая ротация 4K-обоев для Linux.
-Поддерживает русский и английский языки тегов, несколько поисковых систем,
-оффлайн-буфер на случай отсутствия интернета и работу по таймеру systemd.
+⚔️  Grimwall / Wallpapers CLI: Кросс-платформенная 4K-ротация обоев для Linux.
+Поддерживает KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland (swww), X11 (feh).
+Поиск на русском и английском, мульти-источники, оффлайн-буфер и гибкое расписание.
         """,
         epilog="""
 Примеры использования:
   wallpapers next                           Следующие 4K обои по умолчанию (Warhammer 40,000)
   wallpapers next --tag "дота 2"            Поиск по русскому тегу (авто-перевод на EN)
-  wallpapers next --tag "криг" --ratio 16x9 Корпус Смерти Крига 16:9
-  wallpapers next --tag "cyberpunk"         Поиск по английскому тегу
-  wallpapers next --buffer 10               Задать размер оффлайн-буфера (10 штук)
-  wallpapers buffer                         Проверить статус и пополнить оффлайн-буфер
+  wallpapers next --tag "криг" --ratio 16x9 Корпус Смерти Крига строго 16:9
+  wallpapers schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
+  wallpapers schedule 6h                    Настроить смену обоев каждые 6 часов
+  wallpapers buffer                         Проверить статус оффлайн-буфера
+  wallpapers buffer -b 10 --sync            Пополнить буфер до 10 обоев на случай оффлайна
   wallpapers prev                           Откатить на предыдущие обои
   wallpapers current                        Показать информацию о текущих обоях
   wallpapers list                           Показать все сохранённые файлы в кэше
@@ -439,6 +592,10 @@ def build_parser():
     parser_next.add_argument("-b", "--buffer", type=int, help="Размер оффлайн-буфера обоев (по умолчанию: 5)")
     parser_next.add_argument("-l", "--local", action="store_true", help="Брать только из оффлайн-буфера/кэша, без интернета")
     parser_next.add_argument("-s", "--silent", action="store_true", help="Не показывать всплывающее уведомление")
+
+    # Command: schedule
+    parser_sched = subparsers.add_parser("schedule", help="Настроить время смены обоев (systemd таймер)")
+    parser_sched.add_argument("time", nargs="?", type=str, help="Время суток (15:30, 09:00) или интервал (6h, 12h)")
 
     # Command: buffer
     parser_buf = subparsers.add_parser("buffer", help="Управление оффлайн-буфером обоев")
@@ -473,6 +630,8 @@ def main():
 
     if args.command in (None, "next"):
         cmd_next(args, config)
+    elif args.command in ("schedule", "time", "timer"):
+        cmd_schedule(args, config)
     elif args.command in ("buffer", "sync"):
         cmd_buffer(args, config)
     elif args.command in ("prev", "previous"):
