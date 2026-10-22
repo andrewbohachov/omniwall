@@ -2,12 +2,16 @@
     "min_resolution": "3840x2160",
     "ratios": "16x9",
     "purity": "100",
-    "tags": ["id:2143"],
-    "search_queries": [
+    "buffer_size": 5,
+    "sources": [
+        "wallhaven",
+        "bing"
+    ],
+    "default_queries": [
         "id:2143",
         "Astra Militarum",
         "Death Korps of Krieg",
-        "Iron Hands",
+        "Iron Hands Space Marines",
         "Salamanders 40k",
         "Black Templars",
         "Dreadnought warhammer"
