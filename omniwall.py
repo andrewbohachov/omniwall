@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "ratios": "16x9",
     "purity": "100",  # SFW
     "buffer_size": 5,  # количество оффлайн-обоев в буфере
-    "max_cache_mb": 80,  # максимальный размер кэша обоев (МБ)
+    "max_storage_mb": 80,  # ОБЩИЙ СУММАРНЫЙ лимит на ВСЕ картинки (кэш + история + буфер) в МБ
     "max_cached_files": 15,  # максимум файлов в кэше
     "max_file_size_mb": 15,  # лимит размера одного файла обоев (МБ)
     "schedule": "12:00",  # ежедневное время смены
@@ -154,6 +154,21 @@ def notify(title, message):
 
 # ----------------- УПРАВЛЕНИЕ КЭШЕМ И ОПТИМИЗАЦИЯ МЕСТА -----------------
 
+def parse_size_to_mb(val_str):
+    if val_str is None:
+        return None
+    if isinstance(val_str, (int, float)):
+        return max(5, int(val_str))
+    s = str(val_str).strip().lower().replace(" ", "")
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*(gb|гб|g|mb|мб|m)?$", s)
+    if not m:
+        return None
+    num = float(m.group(1))
+    unit = m.group(2) or "mb"
+    if unit in ("gb", "гб", "g"):
+        return max(5, int(num * 1024))
+    return max(5, int(num))
+
 def get_directory_stats(dir_path):
     if not dir_path.exists():
         return 0, 0, []
@@ -161,15 +176,30 @@ def get_directory_stats(dir_path):
     total_bytes = sum(f.stat().st_size for f in files)
     return len(files), total_bytes, files
 
-def cleanup_cache(config, force_clean=False):
+def get_storage_stats():
+    c_count, c_bytes, c_files = get_directory_stats(CACHE_DIR)
+    b_count, b_bytes, b_files = get_directory_stats(BUFFER_DIR)
+    return {
+        "cache_count": c_count,
+        "cache_bytes": c_bytes,
+        "cache_files": c_files,
+        "buffer_count": b_count,
+        "buffer_bytes": b_bytes,
+        "buffer_files": b_files,
+        "total_count": c_count + b_count,
+        "total_bytes": c_bytes + b_bytes
+    }
+
+def cleanup_storage(config, force_clean=False):
     """
-    Удаляет устаревшие обои по принципу LRU (Least Recently Used),
-    удерживая кэш в пределах max_cache_mb и max_cached_files.
-    Никогда не удаляет текущие установленные обои и файлы оффлайн-буфера.
+    Контролирует СУММАРНЫЙ размер ВСЕХ изображений утилиты (кэш + история + оффлайн-буфер),
+    чтобы общий объем файлов строго укладывался в заданный пользователем лимит max_storage_mb.
+    При превышении лимита удаляет самые старые неактивные файлы (LRU).
+    Никогда не удаляет текущие активные обои на рабочем столе.
     """
-    max_mb = config.get("max_cache_mb", 80)
-    max_files = config.get("max_cached_files", 15)
+    max_mb = config.get("max_storage_mb", config.get("max_cache_mb", 80))
     max_bytes = max_mb * 1024 * 1024
+    max_files = config.get("max_cached_files", 15)
 
     state = load_state()
     protected_paths = set()
@@ -193,18 +223,19 @@ def cleanup_cache(config, force_clean=False):
         except Exception:
             pass
 
-    count, total_bytes, files = get_directory_stats(CACHE_DIR)
-    if not files:
-        return 0, 0
+    stats = get_storage_stats()
+    total_bytes = stats["total_bytes"]
+    cache_files = stats["cache_files"]
+    buffer_files = stats["buffer_files"]
 
-    # Сортируем от самых старых к новым (по времени mtime)
-    files.sort(key=lambda f: f.stat().st_mtime)
+    # Сортируем кэш по mtime (старые первыми)
+    cache_files.sort(key=lambda f: f.stat().st_mtime)
 
     deleted_count = 0
     deleted_bytes = 0
 
     if force_clean:
-        for f in files:
+        for f in cache_files:
             if f.resolve() not in protected_paths:
                 f_size = f.stat().st_size
                 try:
@@ -214,11 +245,11 @@ def cleanup_cache(config, force_clean=False):
                 except Exception:
                     pass
     else:
-        for f in files:
-            # Прекращаем удаление, если уже уложились в оба лимита
-            current_rem_bytes = total_bytes - deleted_bytes
-            current_rem_count = count - deleted_count
-            if current_rem_bytes <= max_bytes and current_rem_count <= max_files:
+        # 1. Удаляем устаревшие файлы из кэша (истории)
+        for f in cache_files:
+            curr_total = total_bytes - deleted_bytes
+            curr_cache_count = len(cache_files) - deleted_count
+            if curr_total <= max_bytes and curr_cache_count <= max_files:
                 break
 
             if f.resolve() in protected_paths:
@@ -232,6 +263,23 @@ def cleanup_cache(config, force_clean=False):
             except Exception:
                 pass
 
+        # 2. Если после очистки кэша суммарный вес ВСЕХ картинок все еще выше лимита,
+        # подчищаем самые старые файлы из буфера (оставляя как минимум 2 резервных файла)
+        if (total_bytes - deleted_bytes) > max_bytes and len(buffer_files) > 2:
+            buffer_files.sort(key=lambda f: f.stat().st_mtime)
+            for f in buffer_files:
+                if (total_bytes - deleted_bytes) <= max_bytes or (len(buffer_files) - deleted_count) <= 2:
+                    break
+                if f.resolve() in protected_paths:
+                    continue
+                f_size = f.stat().st_size
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                    deleted_bytes += f_size
+                except Exception:
+                    pass
+
     # Очищаем историю от ссылок на удалённые файлы
     if deleted_count > 0:
         new_hist = [h for h in history if Path(h["path"]).exists()]
@@ -240,6 +288,8 @@ def cleanup_cache(config, force_clean=False):
             save_state(state)
 
     return deleted_count, deleted_bytes
+
+cleanup_cache = cleanup_storage
 
 # ----------------- КРОСС-ОКРУЖЕНИЕ (DE DETECTION) -----------------
 
@@ -712,12 +762,57 @@ def cmd_list(args):
     for f in sorted(files):
         print(f"  • {f.name} ({f.parent.name})")
 
+def print_storage_summary(config):
+    stats = get_storage_stats()
+    cache_count = stats["cache_count"]
+    cache_mb = stats["cache_bytes"] / (1024 * 1024)
+    buf_count = stats["buffer_count"]
+    buf_mb = stats["buffer_bytes"] / (1024 * 1024)
+    total_count = stats["total_count"]
+    total_mb = stats["total_bytes"] / (1024 * 1024)
+
+    max_mb = config.get("max_storage_mb", config.get("max_cache_mb", 80))
+    max_files = config.get("max_cached_files", 15)
+    percent = (total_mb / max_mb * 100) if max_mb > 0 else 0
+
+    print("┌────────────────────────────────────────────────────────┐")
+    print("│      OMNIWALL: ОБЩИЙ ОБЪЁМ ХРАНИЛИЩА ВСЕХ ОБОЕВ        │")
+    print("└────────────────────────────────────────────────────────┘")
+    print(f"  Кэш и история  : {cache_count} файлов ({cache_mb:.1f} МБ)")
+    print(f"  Оффлайн-буфер  : {buf_count} файлов ({buf_mb:.1f} МБ / цель {config.get('buffer_size', 5)} шт.)")
+    print("  ────────────────────────────────────────────────────────")
+    print(f"  ИТОГО ЗАНЯТО   : {total_count} файлов — {total_mb:.1f} МБ из {max_mb} МБ ({percent:.1f}%)")
+    print(f"  Суммарный лимит: {max_mb} МБ (макс. {max_files} файлов в кэше)")
+    print("\nКоманды управления размером:")
+    print("  omniwall limit 50MB              # Задать суммарный лимит 50 МБ")
+    print("  omniwall limit 100MB             # Задать суммарный лимит 100 МБ")
+    print("  omniwall limit 1GB               # Задать суммарный лимит 1 ГБ")
+    print("  omniwall cache --clean           # Очистить старые обои прямо сейчас")
+
+def cmd_limit(args, config):
+    val_str = getattr(args, "size", None)
+    if val_str:
+        mb = parse_size_to_mb(val_str)
+        if not mb:
+            print(f"Ошибка формата размера: '{val_str}'. Примеры: 50MB, 100, 200MB, 1GB.", file=sys.stderr)
+            return
+        config["max_storage_mb"] = mb
+        save_config(config)
+        print(f"✓ Новый суммарный лимит на ВСЕ картинки сохранён: {mb} МБ")
+        del_count, del_bytes = cleanup_storage(config)
+        if del_count > 0:
+            print(f"  Автоматически освобождено: {del_count} старых файлов ({del_bytes / (1024*1024):.1f} МБ)")
+    print_storage_summary(config)
+
 def cmd_cache(args, config):
     modified = False
-    if getattr(args, "max_mb", None) is not None:
-        config["max_cache_mb"] = int(args.max_mb)
-        modified = True
-        print(f"✓ Новый лимит размера кэша сохранён: {args.max_mb} МБ")
+    size_input = getattr(args, "size", None) or getattr(args, "limit", None) or getattr(args, "max_mb", None)
+    if size_input is not None:
+        mb = parse_size_to_mb(size_input)
+        if mb:
+            config["max_storage_mb"] = mb
+            modified = True
+            print(f"✓ Новый суммарный лимит на ВСЕ картинки сохранён: {mb} МБ")
 
     if getattr(args, "max_files", None) is not None:
         config["max_cached_files"] = int(args.max_files)
@@ -726,35 +821,16 @@ def cmd_cache(args, config):
 
     if modified:
         save_config(config)
-        del_count, del_bytes = cleanup_cache(config)
+        del_count, del_bytes = cleanup_storage(config)
         if del_count > 0:
             print(f"  Очищено по новым лимитам: {del_count} файлов ({del_bytes / (1024*1024):.1f} МБ)")
 
     if getattr(args, "clean", False):
-        del_count, del_bytes = cleanup_cache(config, force_clean=True)
+        del_count, del_bytes = cleanup_storage(config, force_clean=True)
         print(f"🧹 Очистка кэша завершена: удалено {del_count} старых обоев ({del_bytes / (1024*1024):.1f} МБ).")
         print("   (Текущие активные обои и оффлайн-буфер сохранены).")
 
-    cache_count, cache_bytes, _ = get_directory_stats(CACHE_DIR)
-    buf_count, buf_bytes, _ = get_directory_stats(BUFFER_DIR)
-    total_mb = (cache_bytes + buf_bytes) / (1024 * 1024)
-    cache_mb = cache_bytes / (1024 * 1024)
-    buf_mb = buf_bytes / (1024 * 1024)
-
-    max_mb = config.get("max_cache_mb", 80)
-    max_files = config.get("max_cached_files", 15)
-
-    print("┌────────────────────────────────────────────────────────┐")
-    print("│         OMNIWALL: СОСТОЯНИЕ КЭША И ХРАНИЛИЩА           │")
-    print("└────────────────────────────────────────────────────────┘")
-    print(f"  Кэш обоев      : {cache_count} файлов ({cache_mb:.1f} МБ / лимит {max_mb} МБ)")
-    print(f"  Оффлайн-буфер  : {buf_count} файлов ({buf_mb:.1f} МБ / цель {config.get('buffer_size', 5)} шт.)")
-    print(f"  Всего занято   : {total_mb:.1f} МБ")
-    print(f"  Лимиты         : {max_mb} МБ, максимум {max_files} файлов в кэше")
-    print("\nКоманды управления кэшем:")
-    print("  omniwall cache --clean            # Удалить все старые обои кроме текущих")
-    print("  omniwall cache --max-mb 50        # Ограничить кэш 50 мегабайтами")
-    print("  omniwall cache --max-files 10     # Хранить не более 10 последних обоев")
+    print_storage_summary(config)
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -770,11 +846,12 @@ def build_parser():
   omniwall next                           Следующие 4K обои (по закреплённому тегу или Warhammer 40k)
   omniwall next --tag "дота 2"            Закрепить тег "дота 2" и сразу поставить обои
   omniwall next --reset-tag               Сбросить закрепление и вернуться к Warhammer 40k
+  omniwall limit 50MB                     Задать суммарный лимит на ВСЕ картинки (50 МБ)
+  omniwall limit 100MB                    Задать суммарный лимит на ВСЕ картинки (100 МБ)
+  omniwall limit                          Показать текущий суммарный объем и лимит
+  omniwall cache --clean                  Очистить старые файлы кэша (освободить диск)
   omniwall tag "киберпанк"                Закрепить тег без немедленной смены обоев
   omniwall tag                            Показать текущий активный закреплённый тег
-  omniwall cache                          Показать занятое место и статус кэша
-  omniwall cache --clean                  Очистить старые файлы кэша (освободить диск)
-  omniwall cache --max-mb 50              Установить лимит кэша в 50 МБ
   omniwall schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
   omniwall schedule 6h                    Настроить смену обоев каждые 6 часов
   omniwall buffer                         Проверить статус оффлайн-буфера
@@ -797,6 +874,10 @@ def build_parser():
     parser_next.add_argument("-l", "--local", action="store_true", help="Брать только из оффлайн-буфера/кэша, без интернета")
     parser_next.add_argument("-s", "--silent", action="store_true", help="Не показывать всплывающее уведомление")
 
+    # Command: limit
+    parser_limit = subparsers.add_parser("limit", help="Задать или просмотреть суммарный лимит размера на ВСЕ картинки")
+    parser_limit.add_argument("size", nargs="?", type=str, help="Лимит на сумму всех файлов (например: 50MB, 100MB, 200MB, 1GB)")
+
     # Command: tag
     parser_tag = subparsers.add_parser("tag", help="Просмотреть или закрепить основной тег поиска")
     parser_tag.add_argument("tag_name", nargs="?", type=str, help="Название тега (RU или EN), например: 'dota 2', 'криг', 'cyberpunk'")
@@ -805,8 +886,9 @@ def build_parser():
 
     # Command: cache
     parser_cache = subparsers.add_parser("cache", help="Управление размером кэша и оптимизация дискового пространства")
+    parser_cache.add_argument("size", nargs="?", type=str, help="Задать суммарный лимит (например: 50MB, 100MB)")
     parser_cache.add_argument("--clean", action="store_true", help="Принудительно удалить все старые обои (кроме текущих и буфера)")
-    parser_cache.add_argument("--max-mb", type=int, help="Задать максимальный размер кэша в мегабайтах (например: 50, 80, 100)")
+    parser_cache.add_argument("--limit", "--max-mb", dest="limit", type=str, help="Суммарный лимит размера на ВСЕ картинки (например: 50MB, 100MB)")
     parser_cache.add_argument("--max-files", type=int, help="Задать максимальное количество файлов в кэше (например: 10, 15)")
 
     # Command: schedule
@@ -846,6 +928,8 @@ def main():
 
     if args.command in (None, "next"):
         cmd_next(args, config)
+    elif args.command in ("limit", "max-size", "storage-limit"):
+        cmd_limit(args, config)
     elif args.command in ("tag", "set-tag"):
         cmd_tag(args, config)
     elif args.command in ("cache", "clean"):

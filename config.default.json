@@ -3,7 +3,7 @@
     "ratios": "16x9",
     "purity": "100",
     "buffer_size": 5,
-    "max_cache_mb": 80,
+    "max_storage_mb": 100,
     "max_cached_files": 15,
     "max_file_size_mb": 15,
     "schedule": "12:00",
