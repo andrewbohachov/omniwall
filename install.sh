@@ -47,11 +47,26 @@ ln -sf "$BIN_DIR/omniwall" "$BIN_DIR/w40k-wallpaper"
 ln -sf "$BIN_DIR/omniwall" "$BIN_DIR/grimwall"
 echo "[2/4] Зарегистрированы команды: omniwall, wallpapers, grimwall"
 
-# Проверяем PATH
+# Проверяем PATH и автоматически добавляем ~/.local/bin в конфиги оболочек
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    echo "⚠️  Внимание: $HOME/.local/bin отсутствует в вашем PATH."
-    echo "    Добавьте следующую строку в ~/.bashrc или ~/.zshrc:"
-    echo '    export PATH="$HOME/.local/bin:$PATH"'
+    ADDED_TO=""
+    if [ -f "$HOME/.bashrc" ] && ! grep -q 'HOME/\.local/bin' "$HOME/.bashrc" && ! grep -q '\$HOME/\.local/bin' "$HOME/.bashrc"; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+        ADDED_TO="~/.bashrc"
+    fi
+    if [ -f "$HOME/.zshrc" ] && ! grep -q 'HOME/\.local/bin' "$HOME/.zshrc" && ! grep -q '\$HOME/\.local/bin' "$HOME/.zshrc"; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+        ADDED_TO="${ADDED_TO:+$ADDED_TO, }~/.zshrc"
+    fi
+    if [ -n "$ADDED_TO" ]; then
+        echo "💡 Папка $BIN_DIR добавлена в PATH в $ADDED_TO."
+        echo "   Чтобы команда стала доступна в текущем терминале: source ~/.bashrc"
+    fi
+fi
+
+# Если есть доступ к /usr/local/bin, создаем глобальный симлинк для максимального удобства
+if [ -w /usr/local/bin ]; then
+    ln -sf "$BIN_DIR/omniwall" /usr/local/bin/omniwall 2>/dev/null || true
 fi
 
 # Перезагружаем конфигурацию systemd --user
