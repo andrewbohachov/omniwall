@@ -44,13 +44,11 @@ DEFAULT_CONFIG = {
     "schedule": "12:00",  # ежедневное время смены
     "sources": ["wallhaven", "bing"],
     "default_queries": [
-        "id:2143",  # Warhammer 40,000 tag
-        "Astra Militarum",
-        "Death Korps of Krieg",
-        "Iron Hands Space Marines",
-        "Salamanders 40k",
-        "Black Templars",
-        "Dreadnought warhammer"
+        "nature landscape",
+        "mountains 4k",
+        "deep space galaxy",
+        "minimalist architecture",
+        "sunset aesthetic"
     ],
     "desktop_notifications": True
 }
@@ -706,11 +704,11 @@ def cmd_tag(args, config):
             en = translate_tag(active)
             print(f"📌 Текущий закреплённый тег: '{active}' (EN: '{en}')")
         else:
-            print("Тег не закреплен (ротация по темам по умолчанию: Warhammer 40,000).")
+            print("Тег не закреплен (ротация тем по умолчанию).")
         print("\nИспользование:")
-        print("  omniwall tag \"dota 2\"         # Закрепить тему 'dota 2'")
-        print("  omniwall tag \"криг\" --apply   # Закрепить и сразу применить новые обои")
-        print("  omniwall tag --reset         # Сбросить закрепление и вернуться к Warhammer 40k")
+        print("  omniwall tag \"природа\"         # Закрепить тему 'природа'")
+        print("  omniwall tag \"горы\" --apply    # Закрепить и сразу применить новые обои")
+        print("  omniwall tag --reset          # Сбросить закрепление и вернуться к темам по умолчанию")
 
 def cmd_current(args, config=None):
     state = load_state()
@@ -843,14 +841,14 @@ def build_parser():
         """,
         epilog="""
 Примеры использования:
-  omniwall next                           Следующие 4K обои (по закреплённому тегу или Warhammer 40k)
-  omniwall next --tag "дота 2"            Закрепить тег "дота 2" и сразу поставить обои
-  omniwall next --reset-tag               Сбросить закрепление и вернуться к Warhammer 40k
+  omniwall next                           Следующие 4K обои (по закреплённому тегу или по умолчанию)
+  omniwall next --tag "горы"              Закрепить тег "горы" и сразу поставить обои
+  omniwall next --reset-tag               Сбросить закрепление и вернуться к темам по умолчанию
   omniwall limit 50MB                     Задать суммарный лимит на ВСЕ картинки (50 МБ)
   omniwall limit 100MB                    Задать суммарный лимит на ВСЕ картинки (100 МБ)
   omniwall limit                          Показать текущий суммарный объем и лимит
   omniwall cache --clean                  Очистить старые файлы кэша (освободить диск)
-  omniwall tag "киберпанк"                Закрепить тег без немедленной смены обоев
+  omniwall tag "космос"                   Закрепить тег без немедленной смены обоев
   omniwall tag                            Показать текущий активный закреплённый тег
   omniwall schedule 15:30                 Настроить смену обоев на 15:30 ежедневно
   omniwall schedule 6h                    Настроить смену обоев каждые 6 часов
@@ -880,7 +878,7 @@ def build_parser():
 
     # Command: tag
     parser_tag = subparsers.add_parser("tag", help="Просмотреть или закрепить основной тег поиска")
-    parser_tag.add_argument("tag_name", nargs="?", type=str, help="Название тега (RU или EN), например: 'dota 2', 'криг', 'cyberpunk'")
+    parser_tag.add_argument("tag_name", nargs="?", type=str, help="Название тега (RU или EN), например: 'горы', 'природа', 'space', 'architecture'")
     parser_tag.add_argument("-a", "--apply", action="store_true", help="Сразу скачать и применить новые обои по этому тегу")
     parser_tag.add_argument("--reset", action="store_true", help="Сбросить закрепление и вернуться к темам по умолчанию")
 
