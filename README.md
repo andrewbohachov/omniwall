@@ -1,202 +1,217 @@
-# OmniWall 🌌
+# OmniWall
 
-> **Универсальная 4K-утилита и `systemd` сервис для автоматической и ручной ротации обоев на любом Linux-дистрибутиве (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, X11/feh)**
+**[English](README.md)** | [Русский](README_RU.md)
 
-**OmniWall** — лёгкий, быстрый и функциональный инструмент для поиска, загрузки и ротации обоев сверхвысокого разрешения (**4K UHD**, **UltraWide 21:9**, **32:9**). Утилита поддерживает поиск по любым тегам (на русском и английском языках), надёжную работу без интернета через оффлайн-буфер, строгий контроль дискового пространства и фоновую смену по расписанию с нулевым потреблением оперативной памяти.
+Universal 4K wallpaper rotator utility and `systemd` service for Linux desktops (KDE Plasma, GNOME, XFCE, Cinnamon, MATE, Wayland/swww, X11/feh).
+
+OmniWall is a lightweight, cross-desktop tool designed to fetch, cache, and rotate ultra-high-definition wallpapers (4K UHD, UltraWide 21:9, 32:9). It features multi-source aggregation, bilingual search tag translation (English / Russian), an offline buffer reserve, strict user-defined total disk storage limits with LRU cache cleanup, and scheduled background rotation with zero RAM usage.
 
 ---
 
-## 📦 Быстрая установка
+## Installation
 
-### Вариант 1: Установка одной командой (любой Linux-дистрибутив)
-Не требует сборки и прав root. Скрипт сам настроит бинарники, алиасы и таймер `systemd`:
+### Method 1: Single-Command Shell Installer (Recommended)
+Installs binaries and systemd units to user space without requiring root privileges:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andrewbohachov/omniwall/main/install.sh | bash
 ```
 
-### Вариант 2: Готовый `.deb` пакет (Ubuntu, Debian, Linux Mint, Pop!_OS)
-Скачайте `.deb` файл со страницы [Releases](https://github.com/andrewbohachov/omniwall/releases) и установите:
+### Method 2: Debian / Ubuntu Package (.deb)
+Download the pre-compiled `.deb` package from [Releases](https://github.com/andrewbohachov/omniwall/releases) and install via APT:
 ```bash
 sudo apt install ./omniwall_1.0.0_all.deb
 ```
 
-### Вариант 3: Arch Linux (AUR / PKGBUILD)
+### Method 3: Arch Linux (PKGBUILD / AUR)
 ```bash
 yay -S omniwall
-# или через makepkg:
+# or manually:
 makepkg -si
 ```
 
-### Вариант 4: Через pipx / pip (Python)
+### Method 4: Python pipx / pip
 ```bash
 pipx install git+https://github.com/andrewbohachov/omniwall.git
 ```
 
 ---
 
-## ✨ Ключевые возможности
+## Features
 
-- 🖥️ **Кросс-десктопная поддержка**:
-  - **KDE Plasma 5 & 6** (нативный `plasma-apply-wallpaperimage`)
-  - **GNOME** (Ubuntu, Fedora, Pop!_OS через `gsettings` с синхронизацией светлой и тёмной тем)
-  - **Cinnamon & MATE** (Linux Mint)
-  - **XFCE** (`xfconf-query`)
-  - **Wayland тайлинг-композиторы** (Hyprland, Sway через `swww`)
-  - **X11 оконные менеджеры** (i3, bspwm, Openbox через `feh` или `nitrogen`)
-- 🌐 **Двуязычный поиск (RU / EN)**:
-  - Поддерживает ввод тегов как на русском, так и на английском («*природа*», «*горы*», «*космос*», «*архитектура*», «*минимализм*» и любые другие).
-  - Встроен автоматический словарь и переводчик для поиска по международным базам.
-- 📌 **Умное закрепление тем**:
-  - Указанный тег автоматически закрепляется: все последующие смены обоев будут продолжать искать арты по этой теме, пока вы не зададите новый тег.
-- ⚡ **0 МБ RAM в простое**:
-  - Утилита не висит постоянным фоновым процессом. Она запускается на 1–2 секунды через `systemd.timer` (`oneshot`), меняет обои и полностью выгружается из памяти.
-- 📡 **Мульти-источниковая агрегация**:
-  - **Wallhaven REST API**: официальная база с фильтрацией по высокому разрешению и соотношению сторон.
-  - **Web 4K Engine**: поиск оригиналов сверхвысокого качества без водяных знаков и блокировок.
-- 💾 **Строгий контроль дискового пространства**:
-  - Возможность вручную задать лимит на суммарный размер всех сохранённых обоев (кэш, история и буфер).
-  - Автоматическая очистка старых просмотренных обоев по алгоритму **LRU** (Least Recently Used).
-  - Текущие активные обои на рабочем столе защищены от удаления.
-- 📴 **Оффлайн-буфер**:
-  - Автоматически держит локальный резерв из свежих обоев на случай отсутствия интернет-соединения.
-- ⏰ **Гибкое расписание**:
-  - Настройка интервала или точного времени смены обоев одной короткой командой.
+- Cross-Desktop Compatibility:
+  - KDE Plasma 5 & 6 (native `plasma-apply-wallpaperimage`)
+  - GNOME (Ubuntu, Fedora, Pop!_OS via `gsettings` with dark and light mode sync)
+  - Cinnamon and MATE (Linux Mint)
+  - XFCE (`xfconf-query`)
+  - Wayland tiling compositors (Hyprland, Sway via `swww`)
+  - X11 window managers (i3, bspwm, Openbox via `feh` or `nitrogen`)
+- Bilingual Search (EN / RU):
+  - Search using English or Russian keywords ("mountains", "space", "nature", "architecture", "minimalism", etc.).
+  - Built-in translation pipeline for querying international wallpaper repositories.
+- Persistent Tag Pinning:
+  - When a search tag is specified, it is automatically pinned. All subsequent manual switches and scheduled timer events will continue rotating wallpapers under that tag until updated.
+- Zero Background RAM Footprint:
+  - Not an active daemon. Executes for 1-2 seconds via a `systemd.timer` oneshot unit, updates the wallpaper, and immediately exits memory.
+- Multi-Source Aggregation:
+  - Wallhaven REST API: Official database with strict 4K and aspect ratio filters.
+  - Web 4K Engine: Direct high-resolution image discovery without watermarks.
+- Strict Total Storage Management:
+  - Users can set a hard limit on the total disk size consumed by all images combined (cache, history, and offline buffer).
+  - Automatically evicts oldest unused wallpapers using an LRU (Least Recently Used) cache strategy.
+  - Active desktop wallpaper is always protected from deletion.
+- Offline Buffer Reserve:
+  - Automatically maintains a local reserve of fresh wallpapers so rotations continue smoothly during network outages.
+- Flexible Scheduling:
+  - Configure intervals (e.g. `6h`, `12h`) or specific times of day (e.g. `15:30`) with a single command.
+- Multi-Language CLI:
+  - Full support for English (`en`) and Russian (`ru`) user interfaces.
 
 ---
 
-## 🚀 Примеры использования
+## Usage
 
-### Базовое управление
+### Basic Commands
 ```bash
-# Показать подробную справку по всем командам и параметрам
+# Display full command-line help
 omniwall --help
 
-# Установить следующие 4K-обои
+# Set next 4K wallpaper
 omniwall next
 
-# Вернуться к предыдущим обоям из истории
+# Roll back to previous wallpaper from history
 omniwall prev
 
-# Показать информацию о текущих установленных обоях и окружении
+# Display current wallpaper details and desktop environment
 omniwall current
 
-# Список локально сохранённых файлов обоев
+# List saved local wallpapers in cache
 omniwall list
 ```
 
 ---
 
-### Поиск и закрепление тем
-> 💡 **Как работает закрепление:** при указании тега через `--tag` или команду `tag` он становится основным. Все последующие вызовы `omniwall next` и ежедневный таймер будут подбирать обои по этой теме.
+### Tag Search and Pinning
+> Note: Specifying a tag with `--tag` or the `tag` command automatically pins it as the active category for future rotations.
 
 ```bash
-# Закрепить тему и сразу применить новые обои
-omniwall next --tag "горы"
-omniwall next --tag "космос"
-omniwall next --tag "природа"
+# Pin a tag and apply a new wallpaper immediately
+omniwall next --tag "mountains"
+omniwall next --tag "space"
+omniwall next --tag "nature"
 
-# Закрепить тему на будущее (без немедленной смены обоев)
-omniwall tag "архитектура"
+# Pin a tag for future rotations without changing current wallpaper
+omniwall tag "architecture"
 
-# Проверить текущую активную тему
+# View currently pinned tag
 omniwall tag
 
-# Сбросить закрепление темы и вернуться к случайной ротации
+# Reset pinned tag back to default rotation
 omniwall tag --reset
-# (или omniwall next --reset-tag)
+# (or omniwall next --reset-tag)
 
-# Поиск по англоязычным тегам
-omniwall next --tag "mountains sunset"
-omniwall next --tag "space nebula"
-
-# Фильтрация по соотношению сторон (16:9, 16:10, 21:9, 32:9)
-omniwall next --tag "природа" --ratio 16x9
+# Filter by aspect ratio (16:9, 16:10, 21:9, 32:9)
+omniwall next --tag "nature" --ratio 16x9
 omniwall next --ratio 21x9
 
-# Фильтрация по минимальному разрешению
+# Filter by minimum resolution
 omniwall next --res 3840x2160    # 4K UHD
 omniwall next --res 2560x1440    # 2K QHD
 ```
 
 ---
 
-### 💾 Управление памятью и лимитами диска
-> 💡 Вы можете самостоятельно задать максимальный объем диска, который разрешено занимать **всем картинкам суммарно** (кэш, история и оффлайн-буфер). При достижении порога старые файлы плавно удаляются.
+### Storage Limits and Cache Management
+> Note: The storage limit applies to the combined sum of all images (active, cache, history, and offline buffer).
 
 ```bash
-# Задать суммарный лимит дискового пространства (например, 50 МБ, 100 МБ, 1 ГБ):
+# Set total disk limit for all images (e.g. 50MB, 100MB, 1GB):
 omniwall limit 50MB
 omniwall limit 100MB
 omniwall limit 1GB
 
-# Посмотреть текущую сводку занятого места и лимитов:
+# View current storage usage breakdown and configured limits:
 omniwall limit
-# (или omniwall cache)
+# (or omniwall cache)
 
-# Принудительно очистить старый кэш прямо сейчас (активные обои и буфер сохраняются):
+# Force-clean old cached images immediately (preserves active wallpaper and buffer):
 omniwall cache --clean
 
-# Ограничить максимальное количество файлов в кэше:
+# Limit maximum number of cached image files:
 omniwall cache --max-files 10
 ```
 
 ---
 
-### 📴 Оффлайн-буфер (Запас на случай отключения сети)
+### Language Settings
+Switch the CLI language between English and Russian at any time:
 ```bash
-# Проверить статус оффлайн-буфера
+# Switch interface to English
+omniwall lang en
+
+# Switch interface to Russian
+omniwall lang ru
+
+# View currently configured language
+omniwall lang
+```
+
+---
+
+### Offline Buffer Management
+```bash
+# Check current buffer status
 omniwall buffer
 
-# Пополнить буфер до 10 обоев про запас
+# Expand and sync offline buffer up to 10 wallpapers
 omniwall buffer -b 10 --sync
 
-# Заполнить буфер обоями по конкретной теме
-omniwall buffer -b 8 --sync --tag "космос"
+# Sync buffer using a specific tag
+omniwall buffer -b 8 --sync --tag "space"
 
-# Переключить обои строго из локального кэша (без выхода в интернет)
+# Switch wallpaper strictly from local cache without accessing internet
 omniwall next --local
 ```
 
 ---
 
-### ⏰ Настройка расписания смены обоев
+### Rotation Scheduling
 ```bash
-# Менять обои каждый день в 15:30
+# Set daily rotation at 15:30
 omniwall schedule 15:30
 
-# Менять обои каждое утро в 09:00
+# Set daily rotation every morning at 09:00
 omniwall schedule 09:00
 
-# Менять обои каждые 6 часов
+# Rotate wallpapers every 6 hours
 omniwall schedule 6h
 
-# Менять обои каждые 12 часов
+# Rotate wallpapers every 12 hours
 omniwall schedule 12h
 
-# Посмотреть текущее настроенное расписание
+# View currently configured schedule
 omniwall schedule
 ```
 
 ---
 
-## 🛠️ Включение фоновой автосмены
+## Background Automation (systemd)
 
-Для работы фоновой смены обоев по расписанию включите пользовательский таймер `systemd`:
+To enable automatic background rotations according to your configured schedule, activate the user systemd timer:
 ```bash
 systemctl --user enable --now omniwall.timer
 ```
 
-Проверить статус активного таймера:
+Verify timer status:
 ```bash
 systemctl --user status omniwall.timer
 ```
 
-Посмотреть точное время следующего срабатывания:
+Check the next scheduled trigger time:
 ```bash
 systemctl --user list-timers --all | grep omniwall
 ```
 
 ---
 
-## 📜 Лицензия
-Проект распространяется под открытой лицензией [MIT](LICENSE).
+## License
+Released under the [MIT License](LICENSE).
